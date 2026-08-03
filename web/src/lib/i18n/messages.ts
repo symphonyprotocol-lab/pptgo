@@ -156,6 +156,21 @@ const zh = {
   "tokens.revokeTitle": "吊销《{name}》？",
   "tokens.revokeBody": "使用这个令牌的程序会立刻失去访问权限，无法撤销。",
   "tokens.cancel": "取消",
+
+  // ── live preview ───────────────────────────────────────────────────────────
+  "preview.metaTitle": "预览 · PPTGo",
+  "preview.badge": "实时预览",
+  // one key per grammatical number, because a new deck starts at exactly one slide and
+  // "1 slides" would be the first thing every reader of the English table sees
+  "preview.meta": "v{version} · {count} 页 · {time}更新",
+  "preview.metaOne": "v{version} · 1 页 · {time}更新",
+  "preview.position": "第 {index} / {total} 页",
+  "preview.follow": "跟随改动",
+  "preview.followOn": "有新改动时自动翻到那一页",
+  "preview.followOff": "已停止自动翻页——点一下重新跟随",
+  "preview.openEditor": "在编辑器中打开",
+  "preview.loadFailed": "读取失败：{message}",
+  "preview.jumped": "第 {index} 页刚刚被改动",
   "time.justNow": "刚刚",
   "time.minutes": "{n} 分钟前",
   "time.hours": "{n} 小时前",
@@ -690,6 +705,19 @@ const en: Record<keyof typeof zh, string> = {
   "tokens.revokeTitle": "Revoke “{name}”?",
   "tokens.revokeBody": "Whatever is using it loses access immediately. This cannot be undone.",
   "tokens.cancel": "Cancel",
+
+  // ── live preview ───────────────────────────────────────────────────────────
+  "preview.metaTitle": "Preview · PPTGo",
+  "preview.badge": "Live preview",
+  "preview.meta": "v{version} · {count} slides · updated {time}",
+  "preview.metaOne": "v{version} · 1 slide · updated {time}",
+  "preview.position": "Slide {index} of {total}",
+  "preview.follow": "Follow changes",
+  "preview.followOn": "Turns to whichever slide changes",
+  "preview.followOff": "Not turning pages any more — click to follow again",
+  "preview.openEditor": "Open in the editor",
+  "preview.loadFailed": "Could not read the deck: {message}",
+  "preview.jumped": "Slide {index} just changed",
   "time.justNow": "just now",
   "time.minutes": "{n} min ago",
   "time.hours": "{n} h ago",
