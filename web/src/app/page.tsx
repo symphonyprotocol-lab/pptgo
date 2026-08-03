@@ -58,6 +58,15 @@ export default async function Home() {
               <LanguageToggle />
               <ThemeToggle />
             </div>
+            {/* one breakpoint later than the rest of the bar: at `sm` the mark, the tagline,
+                three controls, a link and a filled button already fill the row, and this is
+                the item a visitor is least likely to be looking for on a small screen */}
+            <Link
+              href="/mcp"
+              className="hidden font-mono text-[11px] tracking-[0.2em] whitespace-nowrap text-muted-foreground uppercase transition-colors hover:text-primary lg:block"
+            >
+              {t("mcp.navLink")}
+            </Link>
             <Link
               href="/editor"
               className="hidden font-mono text-[11px] tracking-[0.2em] text-muted-foreground uppercase transition-colors hover:text-primary sm:block"

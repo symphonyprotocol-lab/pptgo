@@ -171,6 +171,63 @@ const zh = {
   "preview.openEditor": "在编辑器中打开",
   "preview.loadFailed": "读取失败：{message}",
   "preview.jumped": "第 {index} 页刚刚被改动",
+  // ── MCP 配置指南 ───────────────────────────────────────────────────────────
+  "mcp.navLink": "MCP 配置",
+  "tokens.guideLink": "这个令牌配到哪里去？看 MCP 配置指南",
+  "mcp.metaTitle": "接入 MCP · PPTGo",
+  "mcp.kicker": "写给 agent 的接口",
+  "mcp.heading": "让 AI 直接写这里的稿子",
+  "mcp.intro":
+    "PPTGo 自带一个 MCP 服务。把它接到 Claude Code、Codex 这类客户端上，agent 就能在你的账号里建稿子、一页页往里写，你在浏览器里看着它成形——不用复制粘贴，也不用它生成一个文件再传上来。",
+  "mcp.stepsKicker": "三步",
+
+  "mcp.step1": "先拿一个令牌",
+  "mcp.step1Body":
+    "MCP 客户端没有浏览器，登录不了，所以它用 API 令牌当身份。去令牌页新建一个，起个能认出是哪台机器的名字。明文只显示这一次，关掉就再也拿不到了。",
+  "mcp.step1Cta": "去创建令牌",
+
+  "mcp.step2": "端点就是这一个地址",
+  "mcp.step2Body": "所有客户端连的都是它。自托管的话，把域名换成你自己的。",
+  "mcp.endpointLabel": "MCP 端点",
+
+  "mcp.step3": "配到客户端里",
+  "mcp.step3Body":
+    "认证走标准的 Bearer 头。凡是能自己设请求头的客户端都能接——下面三种是验过的写法。把 pptgo_YOUR_TOKEN 换成你刚拿到的那串。",
+  "mcp.claudeCode": "Claude Code",
+  "mcp.claudeCodeBody": "一条命令，加完就能在会话里直接用。",
+  "mcp.json": "通用 JSON 配置",
+  "mcp.jsonBody": "写进 .mcp.json 或 Agent SDK 的 mcpServers 里，形状都一样。",
+  "mcp.codex": "Codex CLI",
+  "mcp.codexBody": "Codex 把密钥留在环境变量里，配置文件里只写变量名。",
+  "mcp.codexTomlBody": "不想用命令行的话，这一段等价，手写进去即可。",
+
+  "mcp.toolsHeading": "接上之后 agent 能做什么",
+  "mcp.toolsBody":
+    "十个工具，粒度是「写按页、改按元素」。刻意没有「一次生成整份稿子」那种工具：那会让模型把东西攒到最后一次吐出来，而这一页页出现的过程正是给人看的。",
+  "mcp.toolsRead": "读",
+  "mcp.toolsReadBody":
+    "列出稿子、读整体结构（含位置明显不对的元素）、读某一页的全部细节。写之前先读，写完再读一遍对结果。",
+  "mcp.toolsWrite": "写",
+  "mcp.toolsWriteBody":
+    "整页替换、追加一页、增删改单个元素、调主题。每个写操作都要带它开始时的版本号，版本对不上就会被拒——两个人同时改不会互相覆盖。",
+  "mcp.toolsPreview": "预览",
+  "mcp.toolsPreviewBody": "拿到一个链接，交给人，让对方实时看着稿子被写出来。",
+
+  "mcp.previewHeading": "它交回来的那个预览链接",
+  "mcp.previewBody":
+    "每个写工具的返回值都带 previewUrl。那个链接自带只读权限、不用登录，有效期一周——谁拿到谁能看，所以别往公开的地方贴。想要能撤销、能设密码、能给人编辑权的链接，用文稿列表里的「分享」。",
+
+  "mcp.troubleHeading": "不通的时候",
+  "mcp.trouble401": "一直 401",
+  "mcp.trouble401Body":
+    "令牌没带上，或者带的不是 Authorization: Bearer 这个头。也可能令牌过期或被撤销了——去令牌页看一眼「最近使用」，一直是「从未使用」就说明请求根本没带对。",
+  "mcp.troubleOrigin": "预览链接的域名不对",
+  "mcp.troubleOriginBody":
+    "链接是按 AUTH_URL 生成的。docker compose 里容器看到的主机名是 web:3000，不是别人能打开的地址，所以自托管时这个环境变量要设成外面访问的域名。",
+  "mcp.troubleTools": "客户端看不到工具",
+  "mcp.troubleToolsBody":
+    "认证失败时服务返回的是一个没有任何工具的空服务，不是报错。所以「连上了但一个工具都没有」，先当成认证没过来查。",
+
   // ── 分享链接 ───────────────────────────────────────────────────────────────
   "share.metaTitle": "共享文稿 · PPTGo",
   "share.lockedBadge": "需要密码",
@@ -760,6 +817,63 @@ const en: Record<keyof typeof zh, string> = {
   "preview.openEditor": "Open in the editor",
   "preview.loadFailed": "Could not read the deck: {message}",
   "preview.jumped": "Slide {index} just changed",
+  // ── MCP setup guide ────────────────────────────────────────────────────────
+  "mcp.navLink": "MCP setup",
+  "tokens.guideLink": "Where does this token go? Read the MCP setup guide",
+  "mcp.metaTitle": "Connect over MCP · PPTGo",
+  "mcp.kicker": "The interface for agents",
+  "mcp.heading": "Let an AI write the decks in here",
+  "mcp.intro":
+    "PPTGo ships an MCP server. Point a client like Claude Code or Codex at it and an agent can create decks in your account and write them a page at a time, while you watch the deck take shape in a browser — no copy-paste, and no generating a file somewhere else to upload afterwards.",
+  "mcp.stepsKicker": "Three steps",
+
+  "mcp.step1": "Get a token first",
+  "mcp.step1Body":
+    "An MCP client has no browser and cannot sign in, so it carries an API token instead. Create one on the tokens page and name it after the machine it will live on. The plaintext is shown once and is unrecoverable after you close the dialog.",
+  "mcp.step1Cta": "Create a token",
+
+  "mcp.step2": "One endpoint, this one",
+  "mcp.step2Body": "Every client connects to the same address. Self-hosting: swap in your own domain.",
+  "mcp.endpointLabel": "MCP endpoint",
+
+  "mcp.step3": "Configure the client",
+  "mcp.step3Body":
+    "Authentication is a plain Bearer header, so any client that lets you set one will work. Three that do are below, verified against their current docs. Replace pptgo_YOUR_TOKEN with the token you just created.",
+  "mcp.claudeCode": "Claude Code",
+  "mcp.claudeCodeBody": "One command, and it is available in your next session.",
+  "mcp.json": "Generic JSON config",
+  "mcp.jsonBody": "The same shape whether it goes in .mcp.json or an Agent SDK's mcpServers.",
+  "mcp.codex": "Codex CLI",
+  "mcp.codexBody": "Codex keeps secrets in the environment and stores only the variable name.",
+  "mcp.codexTomlBody": "The same thing by hand, if you would rather not use the CLI.",
+
+  "mcp.toolsHeading": "What the agent can do once it is connected",
+  "mcp.toolsBody":
+    "Ten tools, at the granularity the work actually arrives in: a page for writing, an element for adjusting. There is deliberately no write-the-whole-deck tool — that would let a model buffer everything and emit it at the end, and a deck appearing a page at a time is the part a person is watching.",
+  "mcp.toolsRead": "Read",
+  "mcp.toolsReadBody":
+    "List decks, read a deck's structure (including elements that have ended up somewhere wrong), read one slide in full. Read before writing, and again afterwards to check the result.",
+  "mcp.toolsWrite": "Write",
+  "mcp.toolsWriteBody":
+    "Replace a page, append one, add or change a single element, set the theme. Every write carries the version it started from and is refused if that is no longer current, so two writers cannot bury each other.",
+  "mcp.toolsPreview": "Preview",
+  "mcp.toolsPreviewBody": "Hand back a link, so a person can watch the deck being written.",
+
+  "mcp.previewHeading": "About the preview link it returns",
+  "mcp.previewBody":
+    "Every writing tool returns a previewUrl. That link carries its own read-only access, needs no sign-in and lasts a week — anyone it reaches can open it, so keep it out of public places. For a link you can revoke, lock with a password, or hand out with edit rights, use Share in your deck list instead.",
+
+  "mcp.troubleHeading": "When it will not connect",
+  "mcp.trouble401": "Everything comes back 401",
+  "mcp.trouble401Body":
+    "The token is missing, or is not travelling in an Authorization: Bearer header. It may also have expired or been revoked — check Last used on the tokens page: a token stuck on “never used” means the requests are not carrying it at all.",
+  "mcp.troubleOrigin": "The preview links point at the wrong host",
+  "mcp.troubleOriginBody":
+    "Links are built from AUTH_URL. Under docker compose the container sees itself as web:3000, which is not an address anyone else can open, so a self-hosted deployment has to set that variable to the address people actually use.",
+  "mcp.troubleTools": "The client connects but shows no tools",
+  "mcp.troubleToolsBody":
+    "When authentication fails the server answers with a server that has no tools rather than an error. So “connected, but there is nothing there” is an authentication problem until proven otherwise.",
+
   // ── share links ────────────────────────────────────────────────────────────
   "share.metaTitle": "Shared deck · PPTGo",
   "share.lockedBadge": "Password needed",

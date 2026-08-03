@@ -1,4 +1,6 @@
+import Link from "next/link"
 import { redirect } from "next/navigation"
+import { ArrowRight } from "lucide-react"
 import { currentUser } from "@/auth"
 import { UserMenu } from "@/components/dashboard/user-menu"
 import { TokenList } from "@/components/settings/token-list"
@@ -39,6 +41,15 @@ export default async function TokensPage() {
             {t("tokens.heading")}
           </h1>
           <p className="mt-4 max-w-prose text-sm text-muted-foreground">{t("tokens.intro")}</p>
+          {/* a token on its own does nothing: the next thing a reader needs is where to
+              paste it */}
+          <Link
+            href="/mcp"
+            className="mt-5 inline-flex items-center gap-2 border-b border-border pb-0.5 text-sm transition-colors hover:border-primary hover:text-primary"
+          >
+            {t("tokens.guideLink")}
+            <ArrowRight className="size-3.5" />
+          </Link>
         </div>
 
         <div className="mt-10">
