@@ -1,4 +1,7 @@
+"use client"
+
 import { cn } from "@/lib/utils"
+import { useT } from "@/lib/i18n/client"
 
 export const REPO_URL = "https://github.com/symphonyprotocol-lab/pptgo"
 
@@ -16,13 +19,15 @@ function GithubMark({ className }: { className?: string }) {
 
 /** Icon-only, so it sits in the header bar at the same weight as the theme control. */
 export function GithubLink({ className }: { className?: string }) {
+  const t = useT()
+
   return (
     <a
       href={REPO_URL}
       target="_blank"
       rel="noreferrer"
-      aria-label="在 GitHub 上查看源码"
-      title="在 GitHub 上查看源码"
+      aria-label={t("site.github")}
+      title={t("site.github")}
       className={cn(
         "grid size-7 place-items-center border border-border text-muted-foreground transition-colors",
         "hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary",

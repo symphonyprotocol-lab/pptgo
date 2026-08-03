@@ -4,11 +4,13 @@ import { useSyncExternalStore } from "react"
 import { Monitor, Moon, Sun } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { readThemePref, setThemePref, type ThemePref } from "@/lib/theme"
+import { useT } from "@/lib/i18n/client"
+import type { MessageKey } from "@/lib/i18n/messages"
 
-const OPTIONS: { pref: ThemePref; label: string; Icon: typeof Sun }[] = [
-  { pref: "system", label: "跟随系统", Icon: Monitor },
-  { pref: "light", label: "浅色", Icon: Sun },
-  { pref: "dark", label: "深色", Icon: Moon },
+const OPTIONS: { pref: ThemePref; label: MessageKey; Icon: typeof Sun }[] = [
+  { pref: "system", label: "theme.system", Icon: Monitor },
+  { pref: "light", label: "theme.light", Icon: Sun },
+  { pref: "dark", label: "theme.dark", Icon: Moon },
 ]
 
 /**
@@ -40,6 +42,7 @@ function subscribe(onChange: () => void) {
  * read here only has to keep `aria-pressed` honest for screen readers.
  */
 export function ThemeToggle({ className }: { className?: string }) {
+  const t = useT()
   const pref = useSyncExternalStore(
     subscribe,
     readThemePref,
@@ -49,7 +52,7 @@ export function ThemeToggle({ className }: { className?: string }) {
   return (
     <div
       role="group"
-      aria-label="配色方案"
+      aria-label={t("theme.group")}
       className={cn("flex items-center border border-border", className)}
     >
       {OPTIONS.map(({ pref: option, label, Icon }, index) => (
@@ -57,8 +60,8 @@ export function ThemeToggle({ className }: { className?: string }) {
           key={option}
           type="button"
           data-theme-option={option}
-          aria-label={label}
-          title={label}
+          aria-label={t(label)}
+          title={t(label)}
           aria-pressed={pref === null ? undefined : pref === option}
           onClick={() => {
             setThemePref(option)

@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import { Fraunces, Geist, Geist_Mono } from "next/font/google";
 import { DEFAULT_THEME_PREF, THEME_INIT_SCRIPT } from "@/lib/theme";
+import { I18nProvider } from "@/lib/i18n/client";
+import { getLocale } from "@/lib/i18n/server";
+import { translator } from "@/lib/i18n/translate";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -26,16 +29,19 @@ const fraunces = Fraunces({
   axes: ["SOFT", "WONK", "opsz"],
 });
 
-export const metadata: Metadata = {
-  title: "PPTGo",
-  description: "在线幻灯片编辑器",
-};
+/** The description is the one piece of chrome that has to be resolved per request. */
+export async function generateMetadata(): Promise<Metadata> {
+  const t = translator(await getLocale());
+  return { title: "PPTGo", description: t("site.tagline") };
+}
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const locale = await getLocale();
+
   return (
     // The theme is a client fact — system preference plus whatever the user last chose
     // — so the server can only render the default and let the boot script below correct
@@ -43,7 +49,7 @@ export default function RootLayout({
     // anything is painted. `suppressHydrationWarning` is what lets that correction
     // survive hydration: React keeps the DOM's attributes instead of its own.
     <html
-      lang="zh-CN"
+      lang={locale === "zh" ? "zh-CN" : "en"}
       data-theme-pref={DEFAULT_THEME_PREF}
       suppressHydrationWarning
       className={`${geistSans.variable} ${geistMono.variable} ${fraunces.variable} h-full antialiased`}
@@ -51,7 +57,9 @@ export default function RootLayout({
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>
-      <body className="grain min-h-full flex flex-col">{children}</body>
+      <body className="grain min-h-full flex flex-col">
+        <I18nProvider locale={locale}>{children}</I18nProvider>
+      </body>
     </html>
   );
 }

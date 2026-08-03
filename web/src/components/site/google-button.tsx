@@ -2,6 +2,7 @@
 
 import { useFormStatus } from "react-dom"
 import { cn } from "@/lib/utils"
+import { useT } from "@/lib/i18n/client"
 
 /** Google's four-colour mark. Their brand guidelines require it unmodified. */
 function GoogleMark({ className }: { className?: string }) {
@@ -39,6 +40,7 @@ export function GoogleButton({
   className?: string
 }) {
   const { pending } = useFormStatus()
+  const t = useT()
 
   return (
     <button
@@ -58,7 +60,7 @@ export function GoogleButton({
       <span className="grid size-5 place-items-center rounded-full bg-white">
         <GoogleMark className="size-3.5" />
       </span>
-      {pending ? "正在跳转 Google…" : "使用 Google 账号登录"}
+      {pending ? t("site.signingIn") : t("site.signInWithGoogle")}
     </button>
   )
 }

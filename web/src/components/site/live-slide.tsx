@@ -2,6 +2,7 @@
 
 import { useCallback, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
+import { useT } from "@/lib/i18n/client"
 
 /**
  * The landing page's first screen is not a picture of the editor — it is a working one.
@@ -75,6 +76,7 @@ export function LiveSlide({
   className?: string
   style?: React.CSSProperties
 }) {
+  const t = useT()
   const sheet = useRef<HTMLDivElement>(null)
   const [els, setEls] = useState<El[]>(INITIAL)
   const [active, setActive] = useState<string | null>("title")
@@ -241,7 +243,7 @@ export function LiveSlide({
       {/* the editor's status bar, telling the truth about what is selected */}
       <div className="mt-px flex flex-wrap items-center gap-x-5 gap-y-1 border-t border-border bg-card px-3 py-2 font-mono text-[11px] text-muted-foreground">
         <span className={cn("transition-colors", touched && "text-primary")}>
-          {touched ? "就是这样——这块画布跑的是编辑器本身" : "拖一下、拉一下、转一下"}
+          {touched ? t("demo.hintTouched") : t("demo.hintIdle")}
         </span>
         {selected ? (
           <span className="tabular-nums">
@@ -250,7 +252,7 @@ export function LiveSlide({
             {Math.round(selected.h)} · {Math.round(selected.rot)}°
           </span>
         ) : (
-          <span className="tabular-nums">未选中</span>
+          <span className="tabular-nums">{t("demo.noSelection")}</span>
         )}
         <button
           onClick={() => {
@@ -260,7 +262,7 @@ export function LiveSlide({
           }}
           className="ml-auto underline-offset-4 transition-colors hover:text-foreground hover:underline"
         >
-          复位
+          {t("demo.reset")}
         </button>
       </div>
     </div>
@@ -282,11 +284,12 @@ function ElementBox({
   onResizeStart: (event: React.PointerEvent, anchor: (typeof ANCHORS)[number]) => void
   onRotateStart: (event: React.PointerEvent) => void
 }) {
+  const t = useT()
   return (
     <div
       role="button"
       tabIndex={0}
-      aria-label="幻灯片元素，方向键可移动"
+      aria-label={t("demo.element")}
       onPointerDown={onPointerDown}
       onKeyDown={onKeyDown}
       style={{
@@ -331,13 +334,14 @@ function ElementBox({
  * way the editor's CSS transform scales the real canvas.
  */
 function Content({ kind }: { kind: Kind }) {
+  const t = useT()
   if (kind === "eyebrow") {
     return (
       <p
         style={{ fontSize: "1.5cqw", letterSpacing: "0.3em" }}
         className="font-mono text-neutral-500 uppercase"
       >
-        PPTGo · 在线幻灯片编辑器
+        {t("demo.kicker")}
       </p>
     )
   }
@@ -348,9 +352,9 @@ function Content({ kind }: { kind: Kind }) {
         style={{ fontSize: "6.2cqw", lineHeight: 1.08 }}
         className="font-black tracking-[-0.03em] text-neutral-900"
       >
-        一整套幻灯片,
+        {t("demo.titleLine1")}
         <br />
-        在浏览器里做完
+        {t("demo.titleLine2")}
       </h1>
     )
   }
@@ -361,7 +365,7 @@ function Content({ kind }: { kind: Kind }) {
         style={{ fontSize: "1.9cqw", lineHeight: 1.7 }}
         className="text-neutral-600"
       >
-        拖拽定位、双击改字、右侧调样式。导出的是原生可编辑的 PPTX，不是一张张图片。
+        {t("demo.body")}
       </p>
     )
   }
