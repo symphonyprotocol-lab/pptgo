@@ -253,7 +253,8 @@ function RevealDialog({
           <DialogDescription>{t("tokens.revealBody")}</DialogDescription>
         </DialogHeader>
 
-        <div className="flex items-center gap-2">
+        {/* min-w-0 keeps the nowrap token from widening the dialog's grid column past its max-width */}
+        <div className="flex min-w-0 items-center gap-2">
           <code className="min-w-0 flex-1 overflow-x-auto border border-border bg-muted px-3 py-2 font-mono text-xs whitespace-nowrap">
             {token}
           </code>
