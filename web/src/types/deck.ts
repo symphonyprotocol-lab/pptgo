@@ -4,6 +4,8 @@ export interface DeckSummary {
   title: string
   slideCount: number
   byteSize: number
+  /** bumped on every write to the document; a writer has to present the one it started from */
+  version: number
   hasThumbnail: boolean
   createdAt: string
   updatedAt: string

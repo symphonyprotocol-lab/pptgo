@@ -155,8 +155,12 @@ version: integer("version").notNull().default(1),
 | 情况 | 行为 |
 |---|---|
 | `baseVersion === 当前 version` | 写入，`version += 1`，返回新 version |
-| `baseVersion < 当前 version` | **409 Conflict**，返回当前 version 和完整 deck |
+| `baseVersion < 当前 version` | **409 Conflict**，返回当前 version |
 | 缺省 `baseVersion` | 拒绝（400）。不给"强行覆盖"留默认路径 |
+
+409 只回当前 version，**不回完整 deck**（初版方案说要回）。冲突时最常见的选择是"保留我的"，为另一种选择预先从桶里取出几 MB 幻灯片是白花；真要看新版本，客户端再发一次 `GET /api/decks/[id]` 即可。「用我的覆盖」也不需要新接口——客户端读一次当前 version 再用它当 `baseVersion` 写，语义就是覆盖，且中间若又有人写入仍会正确地再次 409。
+
+**重命名也算一次写入**（初版方案漏了）。标题同时存在数据库行和文档里，所以 `renameDeck` 走同一套版本认领；仪表盘重命名时手上没有版本号，于是它自己读一个、输了重试一次，两次都输返回 409（"这份文稿正在被编辑"）而不是伪装成 404。**缩略图上传不算**：它不碰文档，若也递增版本，每 30 秒一次的缩略图会让所有读者误以为文稿变了并重新拉取。
 
 版本号在**同一条 UPDATE 里做条件递增**，避免读-判断-写之间的竞态：
 
@@ -166,7 +170,13 @@ UPDATE deck SET version = version + 1, ... WHERE id = $1 AND ownerId = $2 AND ve
 
 返回 0 行即冲突。这一点很重要：先 `SELECT` 再 `UPDATE` 在并发下仍会丢写。
 
-写 S3 与写 Postgres 的顺序：**先写 S3 再条件更新 Postgres**。若 UPDATE 因版本不符返回 0 行，S3 上就多了一份没人引用的内容——但下一次成功写入会覆盖它，而反过来（先递增版本再写 S3）失败时会留下"版本号说变了、内容没变"的假状态，那更糟。
+写 S3 与写 Postgres 的顺序：**先条件递增 Postgres，再写 S3**。
+
+> 本节初版写反了，说"先写 S3 再更新 Postgres"，实现时发现那样会制造它本要防止的损坏：两个写入者都基于 v3，A 先写 S3（内容 C_A）并抢到 v4，B 随后写 S3（覆盖成 C_B）才被 UPDATE 拒绝——于是桶里躺着 B 的内容，数据库却说这是 A 的 v4。**一次被拒绝的写入破坏了它没被允许改的东西。**
+>
+> 反过来（先抢版本号）时，被拒绝的写入者根本碰不到桶。代价是另一种失败：抢到版本号但 S3 上传失败，会留下"版本号变了、内容没变"的状态，读者白重载一次——那是浪费一次请求，不是丢一次编辑。实现里还加了条件回滚（`SET version = version - 1 WHERE version = <刚抢到的>`），把这种情况多数时候也消掉。
+>
+> 这个顺序有 `web/src/lib/decks.integration.test.ts` 盯着，它对着真实 Postgres + rustfs 断言"被拒绝的写入者没碰过桶"。
 
 ### 轻量 version 端点
 
@@ -324,8 +334,8 @@ web/package.json                          + @modelcontextprotocol/server, zod
 
 | 阶段 | 内容 | 可验证的产出 |
 |---|---|---|
-| 1 | `deck.version` + 条件递增 + 409 + version 端点 | 两个标签页同开一份 deck，改动不再互相吞掉 |
-| 2 | 编辑器轮询 + 冲突横幅 | 手工 `curl` 改一份 deck，编辑器 4 秒内自己更新 |
+| 1 ✅ | `deck.version` + 条件递增 + 409 + version 端点 | 两个标签页同开一份 deck，改动不再互相吞掉 |
+| 2 ✅ | 编辑器轮询 + 冲突横幅 | 手工 `curl` 改一份 deck，编辑器 4 秒内自己更新 |
 | 3 | `apiToken` 表 + 校验 + 管理页 | `curl -H "Authorization: Bearer …"` 能列出 deck |
 | 4 | `/api/mcp` + 十个工具 | Claude 连上后能从零建出一份 10 页 deck |
 | 5 | `/preview/[id]` + 自动跳页 | 人开着预览页，看着 agent 一页页写出来 |

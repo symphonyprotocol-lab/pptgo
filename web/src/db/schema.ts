@@ -88,6 +88,15 @@ export const decks = pgTable(
     objectKey: text("objectKey").notNull(),
     /** object key of the first-slide PNG, null until the editor has rendered one */
     thumbnailKey: text("thumbnailKey"),
+    /**
+     * Bumped on every write to the document, and the value a writer has to present to be
+     * allowed to write. Two editors open on one deck used to overwrite each other in
+     * silence — the autosave sends the whole document, so the slower one simply won.
+     * A writer now says which version it started from and is refused if that is no longer
+     * current, which is also what lets a reader poll for "has this moved" without
+     * fetching megabytes of slides.
+     */
+    version: integer("version").notNull().default(1),
     createdAt: timestamp("createdAt", { mode: "date", withTimezone: true })
       .notNull()
       .defaultNow(),

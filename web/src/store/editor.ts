@@ -77,6 +77,18 @@ interface EditorState {
   setTheme: (theme: Partial<DeckTheme>) => void
   loadDeck: (deck: Deck) => void
   /**
+   * Replace the document with one that was stored elsewhere — another tab, another
+   * device, or eventually an agent writing through the API.
+   *
+   * Distinct from `loadDeck` in exactly one respect that matters to whoever is watching:
+   * it holds the reader's place. Jumping to slide 1 is right when *opening* a deck and
+   * wrong when a deck someone is reading gets updated underneath them; being thrown back
+   * to the front every time another writer saves would make the deck unreadable while it
+   * is being written. Undo history still goes, because it describes edits to a document
+   * that is no longer the one on screen.
+   */
+  applyRemote: (deck: Deck) => void
+  /**
    * Swap the whole slide array in place, leaving history and the current position
    * alone. This is what deck-wide edits (find and replace) need: `loadDeck` is for
    * *opening* a deck, so it deliberately drops undo history and jumps to slide 1 —
@@ -385,6 +397,24 @@ export const useEditor = create<EditorState>((set, get) => ({
       past: [],
       future: [],
     }),
+
+  applyRemote: (deck) =>
+    set((s) => ({
+      hydrated: true,
+      title: deck.title,
+      theme: deck.theme,
+      slides: deck.slides,
+      // the incoming deck may be shorter than the one on screen, so the held position is
+      // clamped rather than trusted
+      slideIndex: Math.max(0, Math.min(s.slideIndex, deck.slides.length - 1)),
+      // the selection referred to elements of the replaced document; keeping ids that may
+      // no longer exist would leave the property panel editing nothing
+      activeIds: [],
+      editingId: null,
+      tableSelection: null,
+      past: [],
+      future: [],
+    })),
 
   setSlides: (slides) =>
     set((s) => ({

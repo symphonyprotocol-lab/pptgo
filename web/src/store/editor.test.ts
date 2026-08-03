@@ -415,3 +415,51 @@ describe("tables", () => {
     expect(table().rows[0]).toHaveLength(1)
   })
 })
+
+describe("applyRemote", () => {
+  /** A stored deck of `count` slides, standing in for one written by another writer. */
+  const remote = (count: number) => ({
+    ...createDeck(),
+    slides: Array.from({ length: count }, () => createSlide({ elements: [] })),
+  })
+
+  it("holds the reader's place instead of jumping to the first slide", () => {
+    useEditor.getState().loadDeck(remote(5))
+    useEditor.getState().setSlideIndex(3)
+
+    useEditor.getState().applyRemote(remote(5))
+
+    expect(useEditor.getState().slideIndex).toBe(3)
+  })
+
+  it("clamps the held position when the incoming deck is shorter", () => {
+    useEditor.getState().loadDeck(remote(6))
+    useEditor.getState().setSlideIndex(5)
+
+    useEditor.getState().applyRemote(remote(2))
+
+    expect(useEditor.getState().slideIndex).toBe(1)
+  })
+
+  it("drops a selection that referred to the replaced document", () => {
+    reset()
+    useEditor.getState().setActiveIds(ids())
+    expect(useEditor.getState().activeIds).not.toHaveLength(0)
+
+    useEditor.getState().applyRemote(remote(1))
+
+    expect(useEditor.getState().activeIds).toEqual([])
+    expect(useEditor.getState().editingId).toBeNull()
+  })
+
+  it("drops undo history, which described a document that is gone", () => {
+    reset()
+    useEditor.getState().deleteElements(ids())
+    expect(useEditor.getState().past).not.toHaveLength(0)
+
+    useEditor.getState().applyRemote(remote(1))
+
+    expect(useEditor.getState().past).toEqual([])
+    expect(useEditor.getState().future).toEqual([])
+  })
+})
