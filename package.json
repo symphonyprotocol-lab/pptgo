@@ -10,6 +10,6 @@
     "start": "npm --prefix web run start",
     "lint": "npm --prefix web run lint",
     "test": "npm --prefix web run test",
-    "typecheck": "npm --prefix web exec tsc -- --noEmit"
+    "typecheck": "npm --prefix web run typecheck"
   }
 }
