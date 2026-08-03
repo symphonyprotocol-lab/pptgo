@@ -151,7 +151,7 @@ The server is never sent a source tree, only a compose file and a tag, so it nee
 toolchain and no checkout, and what serves is what CI built. A rollback is one line: set
 `WEB_IMAGE` in the server's `.env` to an earlier tag and `docker compose up -d`.
 
-What the server has to have before the first deploy: Docker, a directory (`/srv/pptgo` by
+What the server has to have before the first deploy: Docker, a directory (`/opt/pptgo` by
 default) and a `.env` in it with the secrets. The workflow refuses rather than creating
 one, because a box with no secrets is a box that was never set up.
 
@@ -172,7 +172,7 @@ What the repository has to have:
 
 | Variable | Default |
 |---|---|
-| `DEPLOY_PATH` | `/srv/pptgo` |
+| `DEPLOY_PATH` | `/opt/pptgo` |
 | `PUBLIC_URL` | `https://pptgo.dev` — what the post-deploy check asks for a 200 |
 | `SSH_PORT` | `22` |
 
