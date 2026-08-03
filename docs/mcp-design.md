@@ -117,7 +117,11 @@ MCP 侧用 SDK 自带的 `requireBearerAuth({ verifier, requiredScopes })`——
 
 ### 生成入口
 
-dashboard 增加 `/settings/tokens`：列出（名字、前缀、最后使用时间）、新建（弹出明文一次，附带可复制的客户端配置片段）、吊销。
+`/settings/tokens`：列出（名字、前缀、创建时间、最后使用、有效期）、新建（明文只弹一次，可复制）、吊销。用户菜单里加了入口。
+
+**铸造和吊销只认 session cookie，绝不认 Bearer**（`/api/tokens` 全程只调 `currentUser()`）。能铸造 token 的 token 可以给自己续命，从而活过它自己的吊销——所以发凭证这件事只在浏览器里发生。这条已被验证：拿一个真 token 打 `/api/tokens` 返回 401。
+
+实现时补的几处：每人上限 20 个；`expired` 由**服务端**算进 `ApiTokenSummary` 而不是组件里现算——渲染期的"现在"既不稳定、两侧水合也不一致，而服务端的时钟才是决定 token 还认不认的那个。
 
 ### 作用域
 
@@ -336,7 +340,7 @@ web/package.json                          + @modelcontextprotocol/server, zod
 |---|---|---|
 | 1 ✅ | `deck.version` + 条件递增 + 409 + version 端点 | 两个标签页同开一份 deck，改动不再互相吞掉 |
 | 2 ✅ | 编辑器轮询 + 冲突横幅 | 手工 `curl` 改一份 deck，编辑器 4 秒内自己更新 |
-| 3 | `apiToken` 表 + 校验 + 管理页 | `curl -H "Authorization: Bearer …"` 能列出 deck |
+| 3 ✅ | `apiToken` 表 + 校验 + 管理页 | token 能认出用户，且**还打不开 deck API**——那扇门在阶段 4 才开 |
 | 4 | `/api/mcp` + 十个工具 | Claude 连上后能从零建出一份 10 页 deck |
 | 5 | `/preview/[id]` + 自动跳页 | 人开着预览页，看着 agent 一页页写出来 |
 | 6 | 可选：MCP Apps `ui://`、SSE 替换轮询、PPTX 导出 | — |

@@ -109,3 +109,43 @@ export const decks = pgTable(
 )
 
 export type DeckRow = typeof decks.$inferSelect
+
+/**
+ * Long-lived credentials for clients that have no browser.
+ *
+ * Everything else here authenticates with the Auth.js session cookie, which a headless
+ * client cannot hold: there is no browser to run the Google redirect and nowhere to keep
+ * the cookie afterwards. A token is the same user by another door.
+ *
+ * Only the hash is stored. Sessions keep their token verbatim and get away with it because
+ * they expire in weeks and live in one browser; these are meant to sit in a config file
+ * for months, so a leaked database should not hand over working credentials. The plaintext
+ * exists once, in the response that creates it.
+ */
+export const apiTokens = pgTable(
+  "apiToken",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    ownerId: text("ownerId")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** what the reader called it — "Claude Desktop", "laptop" */
+    name: text("name").notNull(),
+    /** sha256 of the token, hex. The lookup is by this, so it is unique and indexed */
+    tokenHash: text("tokenHash").notNull().unique(),
+    /** the opening characters of the plaintext, so a row can be told from its siblings */
+    prefix: text("prefix").notNull(),
+    /** null until first use; written at most once every few minutes, never on the hot path */
+    lastUsedAt: timestamp("lastUsedAt", { mode: "date", withTimezone: true }),
+    /** null means it does not expire on its own */
+    expiresAt: timestamp("expiresAt", { mode: "date", withTimezone: true }),
+    createdAt: timestamp("createdAt", { mode: "date", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (token) => [index("apiToken_owner_idx").on(token.ownerId)],
+)
+
+export type ApiTokenRow = typeof apiTokens.$inferSelect

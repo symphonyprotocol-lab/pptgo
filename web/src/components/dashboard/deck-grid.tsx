@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { createDeck } from "@/lib/factory"
 import { useI18n } from "@/lib/i18n/client"
+import { formatTime } from "@/lib/relative-time"
 import type { Translate } from "@/lib/i18n/translate"
 import type { DeckSummary } from "@/types/deck"
 
@@ -347,21 +348,4 @@ function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
-}
-
-/**
- * Rendered on the server too, where "now" and the timezone differ from the browser's —
- * hence `suppressHydrationWarning` on the element that shows it.
- *
- * The absolute fallback is formatted for the reader's locale rather than always zh-CN,
- * which put `2026/3/14` in front of readers who write it the other way round.
- */
-function formatTime(iso: string, t: Translate, locale: string): string {
-  const then = new Date(iso)
-  const minutes = Math.round((Date.now() - then.getTime()) / 60_000)
-  if (minutes < 1) return t("time.justNow")
-  if (minutes < 60) return t("time.minutes", { n: minutes })
-  if (minutes < 60 * 24) return t("time.hours", { n: Math.floor(minutes / 60) })
-  if (minutes < 60 * 24 * 7) return t("time.days", { n: Math.floor(minutes / 60 / 24) })
-  return then.toLocaleDateString(locale === "zh" ? "zh-CN" : "en-GB")
 }

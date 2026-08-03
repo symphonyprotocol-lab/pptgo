@@ -1,6 +1,6 @@
 "use client"
 
-import { LogOut, Presentation } from "lucide-react"
+import { KeyRound, LogOut, Presentation } from "lucide-react"
 import Link from "next/link"
 import { signOutEverywhere } from "@/app/actions/auth"
 import {
@@ -52,6 +52,12 @@ export function UserMenu({ user }: { user: SessionUser }) {
           <Link href="/editor">
             <Presentation className="size-4" />
             {t("dashboard.localEditor")}
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link href="/settings/tokens">
+            <KeyRound className="size-4" />
+            {t("dashboard.apiTokens")}
           </Link>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
