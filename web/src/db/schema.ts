@@ -149,3 +149,56 @@ export const apiTokens = pgTable(
 )
 
 export type ApiTokenRow = typeof apiTokens.$inferSelect
+
+/**
+ * One deck, opened up to people who are not signed in.
+ *
+ * Everything else here is owner-scoped: a deck is readable by exactly one account. A share
+ * is the deliberate hole in that — a URL that carries its own permission, so a colleague
+ * can look at a deck (or work on it) without an account of their own.
+ *
+ * **One row per deck.** Changing the mode or the password edits this row rather than
+ * issuing a second link, so "is this deck shared?" has one answer and revoking is one
+ * delete. Several links with different powers is a bigger idea than the dashboard's single
+ * "shared" mark can honestly show.
+ *
+ * **The token is stored in the clear**, unlike an API token, because the owner has to be
+ * able to come back tomorrow and copy their own link again. It is a capability, not a
+ * credential to be proven: whoever holds it is who it was meant for.
+ */
+export const deckShares = pgTable(
+  "deckShare",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    /** unique: one share per deck, so revoking is one row and the mark is one boolean */
+    deckId: text("deckId")
+      .notNull()
+      .unique()
+      .references(() => decks.id, { onDelete: "cascade" }),
+    ownerId: text("ownerId")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** the secret in the URL. Looked up by this, so it is unique and indexed */
+    token: text("token").notNull().unique(),
+    /** `read` or `edit` — what the link lets a visitor do to the deck */
+    mode: text("mode").notNull().default("read"),
+    /**
+     * PBKDF2 of the passphrase, null when the link asks for none. Salted and slow, unlike
+     * the API token's bare sha256: that hashes 256 bits of randomness, this hashes
+     * something a person typed and could plausibly be guessed at.
+     */
+    passwordHash: text("passwordHash"),
+    passwordSalt: text("passwordSalt"),
+    createdAt: timestamp("createdAt", { mode: "date", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updatedAt", { mode: "date", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (share) => [index("deckShare_owner_idx").on(share.ownerId)],
+)
+
+export type DeckShareRow = typeof deckShares.$inferSelect

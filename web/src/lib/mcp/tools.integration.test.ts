@@ -4,6 +4,8 @@ import type { McpServer } from "@modelcontextprotocol/server"
 import { db } from "@/db"
 import { users } from "@/db/schema"
 import { deleteDeck } from "@/lib/decks"
+import { SHARE_KEY_PARAM } from "@/lib/constants"
+import { ownerFromPreviewKey } from "@/lib/share-link"
 import { registerTools } from "./tools"
 
 /**
@@ -79,7 +81,14 @@ describe.skipIf(!live)("the MCP tools against real storage", () => {
   it("creates a deck at version 1 and hands back somewhere to watch it", async () => {
     const deck = await freshDeck()
     expect(deck.version).toBe(1)
-    expect(deck.previewUrl).toBe(`https://pptgo.test/preview/${deck.deckId}`)
+
+    // the link carries its own read-only access, or the person it is handed to — who is
+    // often signed in nowhere — could not open it
+    const url = new URL(deck.previewUrl as string)
+    expect(url.origin + url.pathname).toBe(`https://pptgo.test/preview/${deck.deckId}`)
+    expect(await ownerFromPreviewKey(deck.deckId, url.searchParams.get(SHARE_KEY_PARAM) ?? "")).toBe(
+      ownerId,
+    )
   })
 
   it("appends a slide and says which one it wrote", async () => {

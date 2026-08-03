@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
-import { currentUser } from "@/auth"
 import { readThumbnail, writeThumbnail } from "@/lib/decks"
+import { deckReader } from "@/lib/deck-access"
 import { readBytes } from "@/lib/http"
 import { getLocale } from "@/lib/i18n/server"
 import { translator } from "@/lib/i18n/translate"
@@ -14,12 +14,12 @@ const MAX_THUMBNAIL_BYTES = 1024 * 1024
  * The bucket is private, so thumbnails are served through the app rather than by a
  * presigned URL — one authorised hop instead of a URL that outlives the session.
  */
-export async function GET(_request: Request, { params }: Context) {
-  const user = await currentUser()
-  if (!user) return new NextResponse(null, { status: 401 })
-
+export async function GET(request: Request, { params }: Context) {
   const { id } = await params
-  const png = await readThumbnail(id, user.id)
+  const reader = await deckReader(request, id)
+  if (!reader) return new NextResponse(null, { status: 401 })
+
+  const png = await readThumbnail(id, reader.ownerId)
   if (!png) return new NextResponse(null, { status: 404 })
 
   return new NextResponse(png as unknown as BodyInit, {
@@ -33,9 +33,16 @@ export async function GET(_request: Request, { params }: Context) {
 
 /** The editor uploads a render of the first slide after each save. */
 export async function PUT(request: Request, { params }: Context) {
-  const user = await currentUser()
   const t = translator(await getLocale())
-  if (!user) return NextResponse.json({ error: t("api.unauthorized") }, { status: 401 })
+  const { id } = await params
+
+  // an edit-mode share link saves thumbnails too: the tile the owner sees in their
+  // dashboard should follow the deck, whoever did the editing
+  const reader = await deckReader(request, id)
+  if (!reader) return NextResponse.json({ error: t("api.unauthorized") }, { status: 401 })
+  if (!reader.canWrite) {
+    return NextResponse.json({ error: t("api.readOnlyLink") }, { status: 403 })
+  }
 
   // the cap is enforced while reading rather than after: `arrayBuffer()` would have
   // buffered the whole upload before anyone could object to its size
@@ -54,8 +61,7 @@ export async function PUT(request: Request, { params }: Context) {
     return NextResponse.json({ error: t("api.thumbnailNotPng") }, { status: 415 })
   }
 
-  const { id } = await params
-  if (!(await writeThumbnail(id, user.id, bytes))) {
+  if (!(await writeThumbnail(id, reader.ownerId, bytes))) {
     return NextResponse.json({ error: t("api.deckNotFound") }, { status: 404 })
   }
 

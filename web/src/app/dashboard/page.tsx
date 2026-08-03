@@ -4,6 +4,7 @@ import { DeckGrid } from "@/components/dashboard/deck-grid"
 import { UserMenu } from "@/components/dashboard/user-menu"
 import { Wordmark } from "@/components/site/wordmark"
 import { listDecks } from "@/lib/decks"
+import { sharedDeckIds } from "@/lib/shares"
 import { getLocale } from "@/lib/i18n/server"
 import { translator } from "@/lib/i18n/translate"
 
@@ -19,7 +20,9 @@ export default async function DashboardPage() {
   if (!user) redirect("/login?next=/dashboard")
 
   const t = translator(await getLocale())
-  const decks = await listDecks(user.id)
+  // one query for the whole grid rather than one per card: the dashboard only needs to
+  // know *whether* each deck is shared, and the dialog fetches the rest when it opens
+  const [decks, sharedIds] = await Promise.all([listDecks(user.id), sharedDeckIds(user.id)])
   const slides = decks.reduce((total, deck) => total + deck.slideCount, 0)
 
   return (
@@ -47,7 +50,7 @@ export default async function DashboardPage() {
         </div>
 
         <div className="mt-10">
-          <DeckGrid initial={decks} />
+          <DeckGrid initial={decks} sharedIds={sharedIds} />
         </div>
       </div>
     </main>

@@ -89,3 +89,22 @@ export const CHART_TYPES: { value: ChartType; labelKey: MessageKey }[] = [
   { value: "doughnut", labelKey: "chart.doughnut" },
   { value: "radar", labelKey: "chart.radar" },
 ]
+
+/**
+ * The query parameter a signed read-only preview link travels in. Short, because it rides
+ * in a chat message.
+ *
+ * It lives here rather than beside the signing in `lib/share-link.ts` for one reason: that
+ * module is `server-only`, and the preview page's shell is a client component that has to
+ * put the same parameter back on every fetch it makes.
+ */
+export const SHARE_KEY_PARAM = "k"
+
+/**
+ * The query parameter a share link's token travels in, once a visitor is inside the app.
+ *
+ * The token is already in the URL they opened; repeating it on each API call is what lets
+ * the editor and the preview fetch a deck they have no session for. Here rather than in
+ * `lib/shares.ts` for the same reason as the key above: that module is server-only.
+ */
+export const SHARE_TOKEN_PARAM = "s"

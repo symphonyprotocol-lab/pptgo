@@ -13,6 +13,7 @@ import {
 } from "@/lib/decks"
 import { createSlide, newId } from "@/lib/factory"
 import { DEFAULT_THEME } from "@/lib/constants"
+import { SHARE_LINK_TTL_DAYS, previewLink } from "@/lib/share-link"
 import { buildElement, elementSpec } from "./element-schema"
 import { outlineDeck } from "./outline"
 import { toStoredHtml } from "./text"
@@ -58,7 +59,16 @@ export interface ToolContext {
 }
 
 export function registerTools(server: McpServer, { ownerId, origin }: ToolContext): void {
-  const previewUrl = (deckId: string) => `${origin}/preview/${deckId}`
+  /**
+   * Signed, so the link works for whoever it is handed to.
+   *
+   * The person an agent is writing for is on the other side of a chat window, not
+   * necessarily signed in here — often without an account at all — and a preview link that
+   * first demands a Google login is not a link, it is a detour. The signature says "read
+   * this one deck, for a week"; see `lib/share-link.ts` for what that does and does not
+   * authorise.
+   */
+  const previewUrl = (deckId: string) => previewLink(origin, deckId, ownerId)
 
   /**
    * Read, change, write — with the version the caller started from.
@@ -105,7 +115,7 @@ export function registerTools(server: McpServer, { ownerId, origin }: ToolContex
           deckId,
           version: written.summary.version,
           slideCount: written.summary.slideCount,
-          previewUrl: previewUrl(deckId),
+          previewUrl: await previewUrl(deckId),
           // said out loud rather than hidden: the deck was not what the caller thought
           ...(stale ? { rebasedFrom: baseVersion, wasAt: current } : {}),
           ...(extra?.() ?? {}),
@@ -165,7 +175,7 @@ export function registerTools(server: McpServer, { ownerId, origin }: ToolContex
       const found = await readDeck(deckId, ownerId)
       if (!found) return fail(DECK_NOT_FOUND)
       return ok({
-        ...outlineDeck(deckId, found.deck, found.summary.version, previewUrl(deckId)),
+        ...outlineDeck(deckId, found.deck, found.summary.version, await previewUrl(deckId)),
       })
     },
   )
@@ -192,7 +202,7 @@ export function registerTools(server: McpServer, { ownerId, origin }: ToolContex
     {
       title: "Link to the live preview",
       description:
-        "The URL where a person can watch this deck, updating as you write. Give it to the user early — they see the deck take shape while you work.",
+        `The URL where a person can watch this deck, updating as you write. Give it to the user early — they see the deck take shape while you work. The link carries its own read-only access and needs no sign-in, so anyone it is forwarded to can view the deck for the next ${SHARE_LINK_TTL_DAYS} days; say so when you hand it over, and do not post it anywhere public. The editorUrl is for the owner and does ask for a sign-in.`,
       inputSchema: z.object({ deckId: z.string() }),
     },
     async ({ deckId }) => {
@@ -202,7 +212,7 @@ export function registerTools(server: McpServer, { ownerId, origin }: ToolContex
         deckId,
         title: found.deck.title,
         version: found.summary.version,
-        previewUrl: previewUrl(deckId),
+        previewUrl: await previewUrl(deckId),
         editorUrl: `${origin}/editor/${deckId}`,
       })
     },
@@ -239,7 +249,7 @@ export function registerTools(server: McpServer, { ownerId, origin }: ToolContex
         title: summary.title,
         version: summary.version,
         slideCount: summary.slideCount,
-        previewUrl: previewUrl(summary.id),
+        previewUrl: await previewUrl(summary.id),
       })
     },
   )

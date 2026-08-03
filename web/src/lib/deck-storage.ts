@@ -1,3 +1,4 @@
+import { SHARE_TOKEN_PARAM } from "./constants"
 import type { Translate } from "./i18n/translate"
 import type { Deck } from "@/types/slides"
 import type { DeckSummary } from "@/types/deck"
@@ -52,7 +53,14 @@ export function localDeckStorage(t: Translate): DeckStorage {
 /** A thumbnail every half minute is enough for the dashboard and cheap to render. */
 const THUMBNAIL_INTERVAL = 30_000
 
-export function cloudDeckStorage(id: string, t: Translate): DeckStorage {
+/**
+ * `shareToken` is how an edit-mode share link identifies itself. It rides on every request
+ * rather than in a cookie because a visitor may hold links to two decks at once, and
+ * because the token is already in the address bar — putting it in the query changes what
+ * is exposed not at all, and keeps one credential in one place.
+ */
+export function cloudDeckStorage(id: string, t: Translate, shareToken?: string): DeckStorage {
+  const query = shareToken ? `?${SHARE_TOKEN_PARAM}=${encodeURIComponent(shareToken)}` : ""
   let lastThumbnail = 0
   /**
    * The version this adapter last read or wrote. Every version number the editor deals in
@@ -62,7 +70,7 @@ export function cloudDeckStorage(id: string, t: Translate): DeckStorage {
   let version: number | null = null
 
   async function currentVersion(): Promise<number> {
-    const response = await fetch(`/api/decks/${id}/version`, { cache: "no-store" })
+    const response = await fetch(`/api/decks/${id}/version${query}`, { cache: "no-store" })
     if (!response.ok) throw new Error(await errorMessage(response, t))
     const body = (await response.json()) as { version: number }
     return body.version
@@ -70,7 +78,7 @@ export function cloudDeckStorage(id: string, t: Translate): DeckStorage {
 
   return {
     async load() {
-      const response = await fetch(`/api/decks/${id}`, { cache: "no-store" })
+      const response = await fetch(`/api/decks/${id}${query}`, { cache: "no-store" })
       if (!response.ok) throw new Error(await errorMessage(response, t))
       const { deck, summary } = (await response.json()) as {
         deck: Deck
@@ -85,7 +93,7 @@ export function cloudDeckStorage(id: string, t: Translate): DeckStorage {
       // with a freshly read version rather than a second, unguarded route
       const base = options?.force ? await currentVersion() : (version ?? (await currentVersion()))
 
-      const response = await fetch(`/api/decks/${id}`, {
+      const response = await fetch(`/api/decks/${id}${query}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ deck, baseVersion: base }),
@@ -105,7 +113,7 @@ export function cloudDeckStorage(id: string, t: Translate): DeckStorage {
       // never a lost edit, so it neither blocks nor fails the save
       if (Date.now() - lastThumbnail > THUMBNAIL_INTERVAL) {
         lastThumbnail = Date.now()
-        void uploadThumbnail(id, deck).catch(() => {})
+        void uploadThumbnail(id, deck, query).catch(() => {})
       }
       return { ok: true }
     },
@@ -117,7 +125,7 @@ export function cloudDeckStorage(id: string, t: Translate): DeckStorage {
   }
 }
 
-async function uploadThumbnail(id: string, deck: Deck): Promise<void> {
+async function uploadThumbnail(id: string, deck: Deck, query: string): Promise<void> {
   const first = deck.slides[0]
   if (!first) return
 
@@ -125,7 +133,7 @@ async function uploadThumbnail(id: string, deck: Deck): Promise<void> {
   const png = await slideToBlob(first, 0.4)
   if (!png) return
 
-  await fetch(`/api/decks/${id}/thumbnail`, {
+  await fetch(`/api/decks/${id}/thumbnail${query}`, {
     method: "PUT",
     headers: { "Content-Type": "image/png" },
     body: png,

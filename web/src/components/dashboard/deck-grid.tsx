@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { Copy, Loader2, MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react"
+import { Copy, Loader2, MoreHorizontal, Pencil, Plus, Share2, Trash2 } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -21,16 +21,47 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { ShareBadge, ShareDialog } from "@/components/dashboard/share-dialog"
 import { createDeck } from "@/lib/factory"
 import { useI18n } from "@/lib/i18n/client"
 import { formatTime } from "@/lib/relative-time"
 import type { Translate } from "@/lib/i18n/translate"
 import type { DeckSummary } from "@/types/deck"
+import type { Share } from "@/types/share"
 
-export function DeckGrid({ initial }: { initial: DeckSummary[] }) {
+/**
+ * What a card shows before anyone opens the dialog: shared, but the mode and whether it is
+ * locked are not worth a query per card on the dashboard's first paint.
+ */
+const PLACEHOLDER: Share = {
+  deckId: "",
+  mode: "read",
+  hasPassword: false,
+  path: "",
+  createdAt: "",
+  updatedAt: "",
+}
+
+export function DeckGrid({
+  initial,
+  sharedIds,
+}: {
+  initial: DeckSummary[]
+  /** decks that already have a link out in the world, so a card can say so on first paint */
+  sharedIds: string[]
+}) {
   const { t, locale } = useI18n()
   const router = useRouter()
   const [decks, setDecks] = useState(initial)
+  const [sharing, setSharing] = useState<DeckSummary | null>(null)
+  /**
+   * What the cards show. Seeded from the server with only "is it shared", then filled in
+   * with the details as the dialog learns them — a card that says "shared · password" got
+   * that from the same response that drew the dialog, not from a second round trip.
+   */
+  const [shares, setShares] = useState<Record<string, Share | null>>(() =>
+    Object.fromEntries(sharedIds.map((id) => [id, PLACEHOLDER])),
+  )
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [renaming, setRenaming] = useState<DeckSummary | null>(null)
@@ -102,6 +133,8 @@ export function DeckGrid({ initial }: { initial: DeckSummary[] }) {
     try {
       await call(`/api/decks/${deck.id}`, { method: "DELETE" })
       setDecks((list) => list.filter((d) => d.id !== deck.id))
+      // the share row cascades with the deck; the mark should go with it
+      setShares((all) => ({ ...all, [deck.id]: null }))
       setDeleting(null)
     } catch (e) {
       setError((e as Error).message)
@@ -149,6 +182,8 @@ export function DeckGrid({ initial }: { initial: DeckSummary[] }) {
             deck={deck}
             t={t}
             locale={locale}
+            share={shares[deck.id] ?? null}
+            onShare={() => setSharing(deck)}
             onRename={() => setRenaming(deck)}
             onDuplicate={() => onDuplicate(deck)}
             onDelete={() => setDeleting(deck)}
@@ -161,6 +196,13 @@ export function DeckGrid({ initial }: { initial: DeckSummary[] }) {
           {t("dashboard.empty")}
         </p>
       )}
+
+      <ShareDialog
+        deck={sharing}
+        t={t}
+        onClose={() => setSharing(null)}
+        onChanged={(deckId, share) => setShares((all) => ({ ...all, [deckId]: share }))}
+      />
 
       <RenameDialog
         t={t}
@@ -198,6 +240,8 @@ function DeckCard({
   deck,
   t,
   locale,
+  share,
+  onShare,
   onRename,
   onDuplicate,
   onDelete,
@@ -205,6 +249,8 @@ function DeckCard({
   deck: DeckSummary
   t: Translate
   locale: string
+  share: Share | null
+  onShare: () => void
   onRename: () => void
   onDuplicate: () => void
   onDelete: () => void
@@ -227,6 +273,11 @@ function DeckCard({
                 {t("dashboard.noPreview")}
               </span>
             </div>
+          )}
+          {share && (
+            <span className="absolute top-2 left-2">
+              <ShareBadge share={share} t={t} />
+            </span>
           )}
           <span className="absolute inset-0 ring-1 ring-transparent transition-all group-hover:ring-primary ring-inset" />
         </div>
@@ -258,6 +309,10 @@ function DeckCard({
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
+          <DropdownMenuItem onSelect={onShare}>
+            <Share2 className="size-4" />
+            {t("share.menuItem")}
+          </DropdownMenuItem>
           <DropdownMenuItem onSelect={onRename}>
             <Pencil className="size-4" />
             {t("dashboard.rename")}

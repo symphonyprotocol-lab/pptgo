@@ -12,14 +12,24 @@ const EditorShell = dynamic(
 )
 
 /** Without a deck id the editor is a signed-out sandbox backed by IndexedDB. */
-export function EditorClient({ deckId }: { deckId?: string }) {
+export function EditorClient({
+  deckId,
+  /** An edit-mode share link, for a visitor whose requests carry no session. */
+  shareToken,
+  backHref,
+}: {
+  deckId?: string
+  shareToken?: string
+  backHref?: string
+}) {
   const t = useT()
   // a new adapter object on every render would restart the load effect in a loop; `t` is
   // stable for a locale, so this only rebuilds when the language itself changes
   const storage = useMemo(
-    () => (deckId ? cloudDeckStorage(deckId, t) : localDeckStorage(t)),
-    [deckId, t],
+    () => (deckId ? cloudDeckStorage(deckId, t, shareToken) : localDeckStorage(t)),
+    [deckId, shareToken, t],
   )
 
-  return <EditorShell storage={storage} backHref={deckId ? "/dashboard" : "/"} />
+  // a shared editor goes back to the marketing page: its visitor has no dashboard
+  return <EditorShell storage={storage} backHref={backHref ?? (deckId ? "/dashboard" : "/")} />
 }

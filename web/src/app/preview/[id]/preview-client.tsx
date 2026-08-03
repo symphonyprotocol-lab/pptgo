@@ -13,6 +13,23 @@ const PreviewShell = dynamic(
   { ssr: false, loading: () => <div className="flex-1 bg-muted/40" /> },
 )
 
-export function PreviewClient({ deckId }: { deckId: string }) {
-  return <PreviewShell deckId={deckId} />
+export function PreviewClient({
+  deckId,
+  previewKey,
+  shareToken,
+  canEdit,
+}: {
+  deckId: string
+  previewKey?: string
+  shareToken?: string
+  canEdit: boolean
+}) {
+  return (
+    <PreviewShell
+      deckId={deckId}
+      previewKey={previewKey}
+      shareToken={shareToken}
+      canEdit={canEdit}
+    />
+  )
 }

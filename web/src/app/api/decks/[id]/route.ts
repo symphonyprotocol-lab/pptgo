@@ -10,20 +10,25 @@ import {
   renameDeck,
   writeDeck,
 } from "@/lib/decks"
+import { deckReader } from "@/lib/deck-access"
 import { readJsonObject } from "@/lib/http"
 import { getLocale } from "@/lib/i18n/server"
 import { translator } from "@/lib/i18n/translate"
 
 type Context = { params: Promise<{ id: string }> }
 
-/** Full document, for the editor to open. */
-export async function GET(_request: Request, { params }: Context) {
-  const user = await currentUser()
+/**
+ * Full document, for the editor to open — and for anyone holding a link to it, which is
+ * why reading goes through `deckReader` rather than straight to the session.
+ */
+export async function GET(request: Request, { params }: Context) {
   const t = translator(await getLocale())
-  if (!user) return NextResponse.json({ error: t("api.unauthorized") }, { status: 401 })
-
   const { id } = await params
-  const found = await readDeck(id, user.id)
+
+  const reader = await deckReader(request, id)
+  if (!reader) return NextResponse.json({ error: t("api.unauthorized") }, { status: 401 })
+
+  const found = await readDeck(id, reader.ownerId)
   if (!found) return NextResponse.json({ error: t("api.deckNotFound") }, { status: 404 })
 
   return NextResponse.json(found)
@@ -38,9 +43,16 @@ export async function GET(_request: Request, { params }: Context) {
  * get by omission.
  */
 export async function PUT(request: Request, { params }: Context) {
-  const user = await currentUser()
   const t = translator(await getLocale())
-  if (!user) return NextResponse.json({ error: t("api.unauthorized") }, { status: 401 })
+  const { id } = await params
+
+  // an edit-mode share link writes here too — that is what "可编辑" means — but a
+  // read-only link and a preview key are refused, and neither can rename or delete below
+  const reader = await deckReader(request, id)
+  if (!reader) return NextResponse.json({ error: t("api.unauthorized") }, { status: 401 })
+  if (!reader.canWrite) {
+    return NextResponse.json({ error: t("api.readOnlyLink") }, { status: 403 })
+  }
 
   const body = await readJsonObject(request, MAX_REQUEST_BYTES)
   if (!body.ok) {
@@ -60,8 +72,7 @@ export async function PUT(request: Request, { params }: Context) {
   const encoded = encodeDeck(deck)
   if (!encoded) return NextResponse.json({ error: t("api.deckTooLarge") }, { status: 413 })
 
-  const { id } = await params
-  const result = await writeDeck(id, user.id, deck, baseVersion, encoded)
+  const result = await writeDeck(id, reader.ownerId, deck, baseVersion, encoded)
   if (result.ok) return NextResponse.json({ deck: result.summary })
   if (result.reason === "not-found") {
     return NextResponse.json({ error: t("api.deckNotFound") }, { status: 404 })

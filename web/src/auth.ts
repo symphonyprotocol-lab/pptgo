@@ -3,26 +3,14 @@ import Google from "next-auth/providers/google"
 import { DrizzleAdapter } from "@auth/drizzle-adapter"
 import { db } from "@/db"
 import { accounts, sessions, users, verificationTokens } from "@/db/schema"
-
-/**
- * Cookie-signing key for a machine that has no `.env.local` yet. A fresh clone is supposed
- * to reach the editor with `npm install && npm run dev`, and without this Auth.js throws
- * `MissingSecret` on every page that reads a session — which is `/` and `/login`.
- *
- * It is deliberately named to be unusable by accident: it only applies outside production,
- * and compose refuses to start without a real `AUTH_SECRET`. Anything signed with this is
- * forgeable, so never run a reachable server with `NODE_ENV=development`.
- */
-const DEV_SECRET = "pptgo-development-only-insecure-secret"
+import { signingSecret } from "@/lib/signing"
 
 /**
  * Google is the only provider. Auth.js picks up `AUTH_GOOGLE_ID` /
  * `AUTH_GOOGLE_SECRET` / `AUTH_SECRET` from the environment on its own.
  */
 export const { handlers, auth, signIn, signOut } = NextAuth({
-  secret:
-    process.env.AUTH_SECRET ||
-    (process.env.NODE_ENV === "production" ? undefined : DEV_SECRET),
+  secret: signingSecret(),
   adapter: DrizzleAdapter(db, {
     usersTable: users,
     accountsTable: accounts,

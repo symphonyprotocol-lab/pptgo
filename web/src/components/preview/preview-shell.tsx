@@ -5,7 +5,7 @@ import Link from "next/link"
 import { PenLine, Radio } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { SlideThumbnail, SlideView } from "@/components/editor/slide-view"
-import { VIEWPORT_HEIGHT, VIEWPORT_WIDTH } from "@/lib/constants"
+import { SHARE_KEY_PARAM, SHARE_TOKEN_PARAM, VIEWPORT_HEIGHT, VIEWPORT_WIDTH } from "@/lib/constants"
 import { normalizeDeck } from "@/lib/factory"
 import { useI18n } from "@/lib/i18n/client"
 import { formatTime } from "@/lib/relative-time"
@@ -38,7 +38,19 @@ function changedIndex(before: Slide[], after: Slide[]): number | null {
   return null
 }
 
-export function PreviewShell({ deckId }: { deckId: string }) {
+export function PreviewShell({
+  deckId,
+  previewKey,
+  shareToken,
+  canEdit,
+}: {
+  deckId: string
+  /** The signed, expiring key on an agent's preview link. */
+  previewKey?: string
+  /** The token on an owner's read-only share link. */
+  shareToken?: string
+  canEdit: boolean
+}) {
   const { t, locale } = useI18n()
   const [deck, setDeck] = useState<Deck | null>(null)
   const [summary, setSummary] = useState<DeckSummary | null>(null)
@@ -64,8 +76,18 @@ export function PreviewShell({ deckId }: { deckId: string }) {
     setFollowing(value)
   }
 
+  /**
+   * Whichever link got the reader here, repeated on every read. Nothing at all when they
+   * arrived with a session, which the API falls back to.
+   */
+  const query = previewKey
+    ? `?${SHARE_KEY_PARAM}=${encodeURIComponent(previewKey)}`
+    : shareToken
+      ? `?${SHARE_TOKEN_PARAM}=${encodeURIComponent(shareToken)}`
+      : ""
+
   const load = useCallback(async () => {
-    const response = await fetch(`/api/decks/${deckId}`, { cache: "no-store" })
+    const response = await fetch(`/api/decks/${deckId}${query}`, { cache: "no-store" })
     if (!response.ok) {
       const body = (await response.json().catch(() => null)) as { error?: string } | null
       throw new Error(body?.error ?? `${response.status}`)
@@ -74,7 +96,7 @@ export function PreviewShell({ deckId }: { deckId: string }) {
     // the same re-sanitising the editor does on load: what is stored is rendered with
     // dangerouslySetInnerHTML, and this page renders it without ever having written it
     return { deck: normalizeDeck(body.deck, t), summary: body.summary }
-  }, [deckId, t])
+  }, [deckId, query, t])
 
   useEffect(() => {
     let cancelled = false
@@ -100,7 +122,9 @@ export function PreviewShell({ deckId }: { deckId: string }) {
 
       let remote: number
       try {
-        const response = await fetch(`/api/decks/${deckId}/version`, { cache: "no-store" })
+        const response = await fetch(`/api/decks/${deckId}/version${query}`, {
+          cache: "no-store",
+        })
         if (!response.ok) return
         remote = ((await response.json()) as { version: number }).version
       } catch {
@@ -135,7 +159,7 @@ export function PreviewShell({ deckId }: { deckId: string }) {
       cancelled = true
       window.clearInterval(timer)
     }
-  }, [deckId, load])
+  }, [deckId, query, load])
 
   useEffect(() => {
     if (jumped === null) return
@@ -210,12 +234,15 @@ export function PreviewShell({ deckId }: { deckId: string }) {
             {t("preview.follow")}
           </Button>
 
-          <Button asChild size="sm" variant="ghost" className="h-7 px-2 text-xs">
-            <Link href={`/editor/${deckId}`}>
-              <PenLine className="size-3.5" />
-              {t("preview.openEditor")}
-            </Link>
-          </Button>
+          {/* someone holding a link to a deck that is not theirs would only reach a 404 */}
+          {canEdit && (
+            <Button asChild size="sm" variant="ghost" className="h-7 px-2 text-xs">
+              <Link href={`/editor/${deckId}`}>
+                <PenLine className="size-3.5" />
+                {t("preview.openEditor")}
+              </Link>
+            </Button>
+          )}
         </div>
       </header>
 
