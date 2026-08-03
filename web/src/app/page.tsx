@@ -5,20 +5,18 @@ import { getLocale } from "@/lib/i18n/server"
 import { translator } from "@/lib/i18n/translate"
 import type { MessageKey } from "@/lib/i18n/messages"
 import { signInWithGoogle } from "@/app/actions/auth"
-import { GithubLink } from "@/components/site/github-link"
 import { GoogleButton } from "@/components/site/google-button"
 import { LiveSlide } from "@/components/site/live-slide"
-import { LanguageToggle } from "@/components/site/language-toggle"
-import { ThemeToggle } from "@/components/site/theme-toggle"
+import { SITE_SHELL, SiteHeader } from "@/components/site/site-header"
 import { Wordmark } from "@/components/site/wordmark"
 
 /**
- * One measure for the whole page. The rules between sections run the full width of the
- * viewport, so any section whose content sat on a different measure made those rules
- * read as misalignment rather than as structure — the wordmark, the slide and the spec
- * rows all have to start on the same vertical line.
+ * One measure for the whole page — the site's, shared with the header. The rules between
+ * sections run the full width of the viewport, so any section whose content sat on a
+ * different measure made those rules read as misalignment rather than as structure: the
+ * wordmark, the slide and the spec rows all have to start on the same vertical line.
  */
-const SHELL = "mx-auto w-full max-w-6xl px-5 sm:px-8"
+const SHELL = SITE_SHELL
 
 /**
  * A spec sheet rather than feature cards — this reads like the back of a manual: dense,
@@ -42,59 +40,7 @@ export default async function Home() {
 
   return (
     <main className="flex-1 bg-background text-foreground">
-      {/* the bar is the app's own chrome height, not a marketing header */}
-      <header className="border-b border-border">
-        <div className={`flex h-14 items-center justify-between gap-4 ${SHELL}`}>
-          <div className="flex items-baseline gap-4">
-            <Wordmark />
-            <span className="hidden font-mono text-[11px] tracking-[0.2em] text-muted-foreground uppercase sm:block">
-              {t("site.tagline")}
-            </span>
-          </div>
-          <nav className="flex items-center gap-3 sm:gap-5">
-            {/* the two icon controls share a size and a rule, so they read as one cluster */}
-            <div className="flex items-center gap-2">
-              <GithubLink />
-              <LanguageToggle />
-              <ThemeToggle />
-            </div>
-            {/* one breakpoint later than the rest of the bar: at `sm` the mark, the tagline,
-                three controls, a link and a filled button already fill the row, and this is
-                the item a visitor is least likely to be looking for on a small screen */}
-            <Link
-              href="/mcp"
-              className="hidden font-mono text-[11px] tracking-[0.2em] whitespace-nowrap text-muted-foreground uppercase transition-colors hover:text-primary lg:block"
-            >
-              {t("mcp.navLink")}
-            </Link>
-            <Link
-              href="/editor"
-              className="hidden font-mono text-[11px] tracking-[0.2em] text-muted-foreground uppercase transition-colors hover:text-primary sm:block"
-            >
-              {t("site.openEditor")}
-            </Link>
-            {/* on a phone the bar cannot hold the mark, the controls and a filled button
-                without wrapping — and the same call to action is one screen down at full
-                width, so this copy of it is the one that goes */}
-            <div className="hidden sm:block">
-              {user ? (
-                <Link
-                  href="/dashboard"
-                  className="inline-flex h-8 items-center gap-2 border border-primary bg-primary px-3 text-xs font-medium text-primary-foreground transition-all hover:shadow-[0_0_24px_-4px_var(--volt)]"
-                >
-                  {t("site.myDecks")}
-                  <ArrowRight className="size-3" />
-                </Link>
-              ) : (
-                <form action={signInWithGoogle}>
-                  <input type="hidden" name="next" value="/dashboard" />
-                  <GoogleButton className="h-8 w-auto gap-2 px-3 text-xs" />
-                </form>
-              )}
-            </div>
-          </nav>
-        </div>
-      </header>
+      <SiteHeader user={user} />
 
       {/* ── the slide is the hero: the headline is an element you can drag ──── */}
       <section className="relative">

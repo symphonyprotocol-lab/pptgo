@@ -1,15 +1,18 @@
 import { headers } from "next/headers"
 import Link from "next/link"
 import { ArrowRight, KeyRound } from "lucide-react"
-import { GithubLink } from "@/components/site/github-link"
-import { LanguageToggle } from "@/components/site/language-toggle"
-import { ThemeToggle } from "@/components/site/theme-toggle"
+import { currentUser } from "@/auth"
+import { SiteHeader } from "@/components/site/site-header"
 import { Wordmark } from "@/components/site/wordmark"
 import { getLocale } from "@/lib/i18n/server"
 import { translator } from "@/lib/i18n/translate"
 import type { MessageKey } from "@/lib/i18n/messages"
 
-/** The same measure as the landing page, so the rules between sections line up with it. */
+/**
+ * Narrower than the landing page's measure, because this page is read rather than scanned
+ * and 6xl of prose is a bad line length. The bar above keeps the site measure — it is the
+ * same bar on every page, and one that resized per page would not be.
+ */
 const SHELL = "mx-auto w-full max-w-4xl px-5 sm:px-8"
 
 export async function generateMetadata() {
@@ -55,29 +58,12 @@ const TROUBLE: { key: string; label: MessageKey; body: MessageKey }[] = [
  */
 export default async function McpGuidePage() {
   const t = translator(await getLocale())
-  const origin = await publicOrigin()
+  const [user, origin] = await Promise.all([currentUser(), publicOrigin()])
   const endpoint = `${origin}/api/mcp`
 
   return (
     <main className="flex-1 bg-background text-foreground">
-      <header className="border-b border-border">
-        <div className={`flex h-14 items-center justify-between gap-4 ${SHELL}`}>
-          <Wordmark />
-          <nav className="flex items-center gap-3 sm:gap-5">
-            <div className="flex items-center gap-2">
-              <GithubLink />
-              <LanguageToggle />
-              <ThemeToggle />
-            </div>
-            <Link
-              href="/settings/tokens"
-              className="hidden font-mono text-[11px] tracking-[0.2em] text-muted-foreground uppercase transition-colors hover:text-primary sm:block"
-            >
-              {t("dashboard.apiTokens")}
-            </Link>
-          </nav>
-        </div>
-      </header>
+      <SiteHeader user={user} />
 
       <div className={`py-12 lg:py-16 ${SHELL}`}>
         <div className="border-b border-foreground/20 pb-6">
