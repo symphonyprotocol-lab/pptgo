@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>pptgo</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #ffffff;
+        --panel: #f6f6f7;
+        --border: #e2e2e5;
+        --fg: #1c1c1e;
+        --muted: #6b6b70;
+        --accent: #c96442;
+        --accent-fg: #ffffff;
+        --ring: #c9644255;
+      }
+      :root[data-theme="dark"],
+      body.dark {
+        --bg: #1f1f22;
+        --panel: #27272b;
+        --border: #3a3a3f;
+        --fg: #ececee;
+        --muted: #a0a0a8;
+        --ring: #c9644288;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; }
+      body {
+        background: var(--bg);
+        color: var(--fg);
+        font: 14px/1.5 ui-sans-serif, -apple-system, "Segoe UI", "PingFang SC",
+          "Microsoft YaHei", sans-serif;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--border);
+        flex: none;
+      }
+      header .title { font-weight: 600; }
+      header .meta { color: var(--muted); font-size: 12px; }
+      header .spacer { flex: 1; }
+      button {
+        font: inherit;
+        color: var(--fg);
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 5px 10px;
+        cursor: pointer;
+      }
+      button:hover { border-color: var(--muted); }
+      button:disabled { opacity: 0.5; cursor: default; }
+      button.primary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: var(--accent-fg);
+      }
+      main { flex: 1; display: flex; min-height: 0; }
+      #rail {
+        width: 132px;
+        flex: none;
+        overflow-y: auto;
+        border-right: 1px solid var(--border);
+        padding: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .thumb {
+        border: 2px solid transparent;
+        border-radius: 6px;
+        background: var(--panel);
+        padding: 0;
+        overflow: hidden;
+        cursor: pointer;
+        position: relative;
+      }
+      .thumb.active { border-color: var(--accent); }
+      .thumb svg { display: block; width: 100%; height: auto; pointer-events: none; }
+      .thumb .ph {
+        aspect-ratio: 16 / 9;
+        display: grid;
+        place-items: center;
+        color: var(--muted);
+        font-size: 11px;
+      }
+      .thumb .tag {
+        position: absolute;
+        left: 4px;
+        bottom: 4px;
+        background: #0009;
+        color: #fff;
+        font-size: 10px;
+        padding: 0 4px;
+        border-radius: 4px;
+      }
+      #stage {
+        flex: 1;
+        min-width: 0;
+        overflow: auto;
+        padding: 16px;
+        display: flex;
+        justify-content: center;
+        align-items: flex-start;
+      }
+      #canvas {
+        position: relative;
+        width: 100%;
+        max-width: 960px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        overflow: hidden;
+        background: #fff;
+      }
+      #canvas svg { display: block; width: 100%; height: auto; }
+      #canvas .pptgo-hit { outline: 2px solid var(--accent); outline-offset: 2px; }
+      #overlay { position: absolute; inset: 0; }
+      #overlay .hit {
+        position: absolute;
+        cursor: text;
+        border-radius: 3px;
+      }
+      #overlay .hit:hover { background: var(--ring); }
+      #side {
+        width: 260px;
+        flex: none;
+        border-left: 1px solid var(--border);
+        padding: 12px;
+        display: none;
+        flex-direction: column;
+        gap: 8px;
+        overflow-y: auto;
+      }
+      #side.open { display: flex; }
+      #side label { font-size: 12px; color: var(--muted); }
+      textarea {
+        font: inherit;
+        color: var(--fg);
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 8px;
+        min-height: 92px;
+        resize: vertical;
+      }
+      textarea:focus { outline: 2px solid var(--ring); }
+      .row { display: flex; gap: 8px; }
+      .row > * { flex: 1; }
+      #status {
+        flex: none;
+        padding: 6px 12px;
+        border-top: 1px solid var(--border);
+        color: var(--muted);
+        font-size: 12px;
+        min-height: 29px;
+        white-space: pre-wrap;
+      }
+      .empty {
+        margin: auto;
+        color: var(--muted);
+        text-align: center;
+        padding: 32px;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <span class="title" id="deckName">pptgo</span>
+      <span class="meta" id="deckMeta"></span>
+      <span class="spacer"></span>
+      <button id="btnReload">刷新</button>
+      <button id="btnFull">全屏</button>
+      <button id="btnExport" class="primary">导出 PPTX</button>
+    </header>
+    <main>
+      <div id="rail"></div>
+      <div id="stage"><div class="empty" id="stageEmpty">正在加载…</div></div>
+      <aside id="side">
+        <label>文字内容</label>
+        <textarea id="editText"></textarea>
+        <div class="row">
+          <button id="btnSave" class="primary">保存</button>
+          <button id="btnCancel">取消</button>
+        </div>
+        <label>让 Claude 修改这一页</label>
+        <textarea id="askText" placeholder="例如：把这页改成三栏对比，配色更克制"></textarea>
+        <button id="btnAsk">发给 Claude</button>
+      </aside>
+    </main>
+    <div id="status"></div>
+    <script>
+      /*__APP_JS__*/
+    </script>
+  </body>
+</html>

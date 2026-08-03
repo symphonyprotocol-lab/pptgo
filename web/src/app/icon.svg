@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- NB: no doubled hyphens anywhere in these comments. A standalone SVG is parsed as
+       XML, where a double hyphen inside a comment is a hard parse error, and the whole
+       file is dropped rather than degraded. Writing the token names below with their CSS
+       prefix is what silently broke this icon once already: it stopped rendering, in
+       every browser, while still looking correct in the editor. -->
+  <!-- The tab icon carries its own ground: a bare mark on an unknown browser chrome is
+       unreadable. Colours are literal because a static SVG cannot see CSS variables; they
+       are graphite-950, bone and volt from globals.css. The ground stays dark in both
+       themes so the favicon is one constant thing across the tab strip. -->
+  <rect width="32" height="32" fill="#090d10"/>
+  <!-- The same pair of sheets as `logo.tsx`, but cropped rather than reproduced. Dropping
+       the 16:9 field into a square tile letterboxes it: two thirds of the height goes to
+       ground, and what is left at 16px is a sliver. So this is the zoomed detail. The
+       sheets keep the mark's lean exactly (7.7 across 26 is the same 4-in-13.5) and the
+       channel holds a constant 2.6, wide enough to survive the 16px round down. The 2 to
+       3px margin stays: it is the dark edge that separates the mark from a light tab. -->
+  <path d="M2 3h14.5L8.8 29H2z" fill="#f1f0ec"/>
+  <path d="M19.1 3H30l-7.7 26H11.4z" fill="#bbe238"/>
+</svg>

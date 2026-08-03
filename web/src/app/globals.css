@@ -1,0 +1,356 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+/* formula elements render through KaTeX, which needs its own stylesheet */
+@import "katex/dist/katex.min.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-heading: var(--font-sans);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+/* ── Two rooms, one building ───────────────────────────────────────────────────
+   Darkroom (`.dark`) and Daylight (`:root`) are the same layout in different light:
+   the same hue axis (252), the same scarce lime accent, the same tight corners. Only
+   the direction of the ramp flips. Both are written in the stock shadcn token names,
+   so every component picks the theme up without being touched, and `.dark` on `<html>`
+   is what switches the components' own `dark:` branches on.
+
+   Which one is live is decided before first paint by the boot script in `layout.tsx`
+   — system preference by default, overridable by the toggle. See `lib/theme.ts`. */
+:root {
+  /* raw palette — everything below is expressed in terms of these */
+  --graphite-950: oklch(0.155 0.009 252);
+  --graphite-900: oklch(0.188 0.009 252);
+  --graphite-850: oklch(0.228 0.009 252);
+  --graphite-800: oklch(0.268 0.009 252);
+  --bone: oklch(0.955 0.006 92);
+  --bone-dim: oklch(0.715 0.013 252);
+  /* the daylight half of the same axis: paper rather than graphite, ink rather than bone */
+  --paper: oklch(0.981 0.003 252);
+  --paper-raised: oklch(1 0 0);
+  --paper-sunk: oklch(0.945 0.005 252);
+  --ink: oklch(0.205 0.012 252);
+  --ink-dim: oklch(0.502 0.014 252);
+
+  /* tight corners: this is an instrument, not a card gallery */
+  --radius: 0.25rem;
+}
+
+/* ── Daylight ─────────────────────────────────────────────────────────────────
+   White paper is now the page, so the accent cannot stay an electric lime: at that
+   lightness it is invisible as text and glaring as a fill. The same hue is taken down
+   the ramp until it carries dark-on-light contrast, and the ink flips with it. */
+:root {
+  color-scheme: light;
+
+  --volt: oklch(0.565 0.148 133);
+  --volt-ink: oklch(0.99 0.012 122);
+  /* the editor's canvas floor — a shade below every panel, so the white slide still
+     sits in its own pool of light rather than dissolving into the chrome */
+  --stage: oklch(0.921 0.005 252);
+
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --card: var(--paper-raised);
+  --card-foreground: var(--ink);
+  --popover: var(--paper-raised);
+  --popover-foreground: var(--ink);
+  --primary: var(--volt);
+  --primary-foreground: var(--volt-ink);
+  --secondary: var(--paper-sunk);
+  --secondary-foreground: var(--ink);
+  --muted: var(--paper-sunk);
+  --muted-foreground: var(--ink-dim);
+  --accent: var(--paper-sunk);
+  --accent-foreground: var(--ink);
+  --destructive: oklch(0.55 0.2 25);
+  /* translucent, so a border darkens whatever it is drawn over rather than painting a line */
+  --border: oklch(0 0 0 / 12%);
+  --input: oklch(0 0 0 / 16%);
+  --ring: var(--volt);
+  --chart-1: var(--volt);
+  --chart-2: oklch(0.58 0.12 195);
+  --chart-3: oklch(0.62 0.16 58);
+  --chart-4: oklch(0.56 0.17 350);
+  --chart-5: oklch(0.6 0.02 252);
+  --sidebar: var(--paper-raised);
+  --sidebar-foreground: var(--ink);
+  --sidebar-primary: var(--volt);
+  --sidebar-primary-foreground: var(--volt-ink);
+  --sidebar-accent: var(--paper-sunk);
+  --sidebar-accent-foreground: var(--ink);
+  --sidebar-border: oklch(0 0 0 / 12%);
+  --sidebar-ring: var(--volt);
+
+  /* atmosphere — see the surfaces at the bottom of this file */
+  --wash-accent: color-mix(in oklch, var(--volt) 12%, transparent);
+  --wash-fill: color-mix(in oklch, var(--ink) 5%, transparent);
+  --hairline: oklch(0 0 0 / 5%);
+  --grain-opacity: 0.16;
+  /* a sheet on paper is separated by a real cast shadow; on graphite it was separated
+     by being the only lit thing, which needed a much heavier one */
+  --sheet-shadow: 0 24px 60px -22px oklch(0.2 0.02 252 / 32%);
+  --sheet-ring: oklch(0 0 0 / 12%);
+}
+
+/* ── Darkroom ─────────────────────────────────────────────────────────────────
+   The chrome is graphite so that the slide — which is white, and is the only thing
+   here the user actually made — is the brightest surface on screen. Text is bone
+   rather than pure white; the accent is a single electric lime, kept scarce. */
+.dark {
+  color-scheme: dark;
+
+  --volt: oklch(0.855 0.19 122);
+  --volt-ink: oklch(0.22 0.06 122);
+  --stage: oklch(0.115 0.008 252);
+
+  --background: var(--graphite-950);
+  --foreground: var(--bone);
+  --card: var(--graphite-900);
+  --card-foreground: var(--bone);
+  --popover: var(--graphite-900);
+  --popover-foreground: var(--bone);
+  --primary: var(--volt);
+  --primary-foreground: var(--volt-ink);
+  --secondary: var(--graphite-850);
+  --secondary-foreground: var(--bone);
+  --muted: var(--graphite-850);
+  --muted-foreground: var(--bone-dim);
+  --accent: var(--graphite-850);
+  --accent-foreground: var(--bone);
+  --destructive: oklch(0.68 0.19 24);
+  /* translucent, so a border reads as a lit edge rather than a painted line */
+  --border: oklch(1 0 0 / 11%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: var(--volt);
+  --chart-1: var(--volt);
+  --chart-2: oklch(0.74 0.13 195);
+  --chart-3: oklch(0.72 0.15 58);
+  --chart-4: oklch(0.66 0.16 350);
+  --chart-5: oklch(0.55 0.02 252);
+  --sidebar: var(--graphite-900);
+  --sidebar-foreground: var(--bone);
+  --sidebar-primary: var(--volt);
+  --sidebar-primary-foreground: var(--volt-ink);
+  --sidebar-accent: var(--graphite-850);
+  --sidebar-accent-foreground: var(--bone);
+  --sidebar-border: oklch(1 0 0 / 11%);
+  --sidebar-ring: var(--volt);
+
+  --wash-accent: color-mix(in oklch, var(--volt) 12%, transparent);
+  --wash-fill: color-mix(in oklch, var(--bone) 5%, transparent);
+  --hairline: oklch(1 0 0 / 4%);
+  --grain-opacity: 0.4;
+  --sheet-shadow: 0 30px 80px -20px rgb(0 0 0 / 0.8);
+  --sheet-ring: oklch(1 0 0 / 20%);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+}
+
+/* Element animations. Names match AnimationEffect so the presenter can set
+   `animation-name` straight from the stored effect. */
+@keyframes fadeIn {
+  from { opacity: 0 }
+  to { opacity: 1 }
+}
+@keyframes slideInUp {
+  from { opacity: 0; translate: 0 40px }
+  to { opacity: 1; translate: 0 0 }
+}
+@keyframes slideInDown {
+  from { opacity: 0; translate: 0 -40px }
+  to { opacity: 1; translate: 0 0 }
+}
+@keyframes slideInLeft {
+  from { opacity: 0; translate: -60px 0 }
+  to { opacity: 1; translate: 0 0 }
+}
+@keyframes slideInRight {
+  from { opacity: 0; translate: 60px 0 }
+  to { opacity: 1; translate: 0 0 }
+}
+@keyframes zoomIn {
+  from { opacity: 0; scale: 0.6 }
+  to { opacity: 1; scale: 1 }
+}
+@keyframes rotateIn {
+  from { opacity: 0; rotate: -180deg; scale: 0.6 }
+  to { opacity: 1; rotate: 0deg; scale: 1 }
+}
+@keyframes fadeOut {
+  from { opacity: 1 }
+  to { opacity: 0 }
+}
+@keyframes zoomOut {
+  from { opacity: 1; scale: 1 }
+  to { opacity: 0; scale: 0.6 }
+}
+@keyframes pulse {
+  0%, 100% { scale: 1 }
+  50% { scale: 1.12 }
+}
+@keyframes shake {
+  0%, 100% { translate: 0 0 }
+  20% { translate: -10px 0 }
+  40% { translate: 10px 0 }
+  60% { translate: -6px 0 }
+  80% { translate: 6px 0 }
+}
+
+/* Slide transitions, applied to the whole slide as it comes in. */
+@keyframes slideTransitionFade {
+  from { opacity: 0 }
+  to { opacity: 1 }
+}
+@keyframes slideTransitionSlideX {
+  from { opacity: 0.4; translate: 12% 0 }
+  to { opacity: 1; translate: 0 0 }
+}
+@keyframes slideTransitionSlideY {
+  from { opacity: 0.4; translate: 0 12% }
+  to { opacity: 1; translate: 0 0 }
+}
+@keyframes slideTransitionZoom {
+  from { opacity: 0.4; scale: 0.88 }
+  to { opacity: 1; scale: 1 }
+}
+/* ── Atmosphere ────────────────────────────────────────────────────────────────
+   Surfaces the pages share. No second palette: everything below is expressed in the
+   shadcn tokens above, so the landing page, the sign-in card and the editor chrome
+   are literally the same greys. */
+@theme inline {
+  --font-display: var(--font-fraunces);
+  --color-stage: var(--stage);
+}
+
+/* Projected light: a soft off-centre wash, as if something upstage is lit. Sits
+   under content at z-0 and never darkens what it is behind. In daylight the same two
+   gradients read as tint on paper rather than as light in a dark room. */
+.stage-glow {
+  background:
+    radial-gradient(60rem 40rem at 72% -10%, var(--wash-accent), transparent 70%),
+    radial-gradient(50rem 34rem at 8% 8%, var(--wash-fill), transparent 65%);
+}
+
+/* Hairline grid, barely there — graph paper, drawn in whichever direction the theme
+   runs. Fades out downwards so content never has to fight it. */
+.hairline-grid {
+  background-image:
+    linear-gradient(to right, var(--hairline) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--hairline) 1px, transparent 1px);
+  background-size: 88px 88px;
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 40%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0%, #000 40%, transparent 100%);
+}
+
+/* Film grain. Large flat fields of near-black band badly on cheap panels; a little
+   noise breaks the gradient up and gives the surface a texture to sit on. Paper does
+   not band, so daylight keeps only enough of it to read as stock rather than as screen. */
+.grain::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  pointer-events: none;
+  opacity: var(--grain-opacity);
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.32'/%3E%3C/svg%3E");
+}
+
+@keyframes rise {
+  from { opacity: 0; translate: 0 18px }
+  to { opacity: 1; translate: 0 0 }
+}
+@keyframes ruleIn {
+  from { transform: scaleX(0) }
+  to { transform: scaleX(1) }
+}
+@keyframes ticker {
+  from { translate: 0 0 }
+  to { translate: -50% 0 }
+}
+
+/* Page-load choreography: every `.rise` starts hidden and is dealt in, staggered by
+   an inline `animation-delay`. One orchestrated entrance beats a dozen hover tricks. */
+.rise {
+  animation: rise 0.75s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.rule-in {
+  transform-origin: left;
+  animation: ruleIn 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.ticker {
+  animation: ticker 34s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise,
+  .rule-in,
+  .ticker {
+    animation: none;
+  }
+}
+
+/* ── Theme control ─────────────────────────────────────────────────────────────
+   The selected segment is drawn from `<html data-theme-pref>`, which the boot script
+   sets before first paint. Driving it from React state instead would mean the server
+   rendering "system" and the client correcting it after hydration — a visible flick of
+   the wrong segment on every load for anyone who has chosen otherwise. */
+[data-theme-pref="system"] [data-theme-option="system"],
+[data-theme-pref="light"] [data-theme-option="light"],
+[data-theme-pref="dark"] [data-theme-option="dark"] {
+  background-color: var(--secondary);
+  color: var(--foreground);
+}
