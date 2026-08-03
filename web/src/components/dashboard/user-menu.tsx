@@ -1,6 +1,6 @@
 "use client"
 
-import { KeyRound, LogOut, Presentation } from "lucide-react"
+import { KeyRound, LayoutGrid, LogOut, Presentation } from "lucide-react"
 import Link from "next/link"
 import { signOutEverywhere } from "@/app/actions/auth"
 import {
@@ -48,6 +48,14 @@ export function UserMenu({ user }: { user: SessionUser }) {
           {user.email}
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
+        {/* first, because it is the way back: this menu is the only chrome the settings
+            pages have, and without it the deck list is reachable only via the wordmark */}
+        <DropdownMenuItem asChild>
+          <Link href="/dashboard">
+            <LayoutGrid className="size-4" />
+            {t("site.myDecks")}
+          </Link>
+        </DropdownMenuItem>
         <DropdownMenuItem asChild>
           <Link href="/editor">
             <Presentation className="size-4" />
