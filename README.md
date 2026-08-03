@@ -155,13 +155,12 @@ What the server has to have before the first deploy: Docker, a directory (`/srv/
 default) and a `.env` in it with the secrets. The workflow refuses rather than creating
 one, because a box with no secrets is a box that was never set up.
 
-Two nginx server blocks are in [`deploy/nginx/`](deploy/nginx) — `pptgo.dev` in front of
-the web container, `s3.pptgo.dev` in front of rustfs's API port for anything outside the
-compose network that needs the bucket. They listen on 80 and leave TLS to certbot. Both
-carry a line that is easy to leave out and hard to diagnose: `/api/mcp` is proxied
-unbuffered, because MCP holds a response open and writes to it as the exchange goes on,
-and the S3 vhost forwards the client's own `Host`, because SigV4 signs that header and
-nginx's default is to replace it — which turns every request into a 403.
+[`deploy/nginx/pptgo.dev.conf`](deploy/nginx/pptgo.dev.conf) is the server block in front
+of the web container. It listens on 80 and leaves TLS to certbot, and it proxies
+`/api/mcp` through a location of its own with buffering off — MCP holds a response open
+and writes to it as the exchange goes on, and a buffering proxy collects the whole thing
+before forwarding any of it. Only the web container is published this way: rustfs stays on
+the compose network, reachable by the app and nothing else.
 
 What the repository has to have:
 

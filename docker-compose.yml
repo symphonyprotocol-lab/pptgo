@@ -81,15 +81,11 @@ services:
       AUTH_GOOGLE_ID: "${AUTH_GOOGLE_ID:-}"
       AUTH_GOOGLE_SECRET: "${AUTH_GOOGLE_SECRET:-}"
 
-      # The address the *app* uses, which is not necessarily the one people type. Left
-      # alone it is the container next door: no TLS to terminate, no proxy in the path,
-      # and it keeps working when a certificate or a DNS record does not. A deck runs to
-      # megabytes and every editor load fetches one, so that hop is worth keeping short.
-      #
-      # A deployment that fronts rustfs with a public name — https://s3.pptgo.dev — can
-      # point this at it instead, but only needs to when something outside this network
-      # has to reach the bucket. Nothing in the app does: thumbnails are served through an
-      # authorised route rather than by a presigned URL that would outlive the session.
+      # The container next door, unless a deployment says otherwise. Keeping it internal
+      # is the point rather than an accident: a deck runs to megabytes and every editor
+      # load fetches one, so that request never leaves the host, needs no TLS handshake
+      # and does not stop working when a certificate lapses. The variable exists for the
+      # deployment whose bucket genuinely lives somewhere else.
       S3_ENDPOINT: "${S3_ENDPOINT:-http://rustfs:9000}"
       S3_REGION: ${S3_REGION:-us-east-1}
       S3_BUCKET: ${S3_BUCKET:-pptgo}
