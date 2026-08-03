@@ -2,18 +2,19 @@ import { headers } from "next/headers"
 import Link from "next/link"
 import { ArrowRight, KeyRound } from "lucide-react"
 import { currentUser } from "@/auth"
-import { SiteHeader } from "@/components/site/site-header"
+import { SITE_SHELL, SiteHeader } from "@/components/site/site-header"
 import { Wordmark } from "@/components/site/wordmark"
 import { getLocale } from "@/lib/i18n/server"
 import { translator } from "@/lib/i18n/translate"
 import type { MessageKey } from "@/lib/i18n/messages"
 
 /**
- * Narrower than the landing page's measure, because this page is read rather than scanned
- * and 6xl of prose is a bad line length. The bar above keeps the site measure — it is the
- * same bar on every page, and one that resized per page would not be.
+ * The site measure, so the wordmark in the bar and the heading under it start on the same
+ * vertical line. Prose is kept readable by `max-w-prose` on the paragraphs themselves
+ * rather than by narrowing the page — the same thing the landing page's spec sheet does,
+ * where the rules run the full measure and the text inside them does not.
  */
-const SHELL = "mx-auto w-full max-w-4xl px-5 sm:px-8"
+const SHELL = SITE_SHELL
 
 export async function generateMetadata() {
   return { title: translator(await getLocale())("mcp.metaTitle") }
