@@ -210,6 +210,8 @@ Agent 的每次写入同样走 read-modify-write：读 S3 JSON → 改 → 条�
 
 **工具层自动重试一次**（重读、重放这一次修改、再写），第二次仍冲突才把错误抛给模型。理由：agent 自己重试要多消耗一轮对话，而"重放一个 element patch"是幂等且语义明确的操作。`slide_write` 这种整页替换**不自动重试**——那可能覆盖别人刚写的内容，必须让模型知道。
 
+实现时补的一条：变基成功时返回值里带 `rebasedFrom` 和 `wasAt`，**明说这次写入落在的不是调用者以为的版本上**。静默变基会让模型以为自己写的是它读到的那份文档。
+
 ---
 
 ## 4. 预览界面
@@ -288,7 +290,11 @@ MCP Apps（`ui://` 资源）能让预览页直接嵌在对话里。这里有个�
 
 **刻意不提供 `deck_write`（整份写入）**：它会让 agent 憋一次性输出，预览页看不到过程；也会让每次修改都传输整份文档（上限 25MB）。
 
-参数校验用 zod，schema 从 [`web/src/types/slides.ts`](../web/src/types/slides.ts) 手写映射一份——TypeScript 类型运行时不存在，必须有独立的运行时 schema。默认值填充复用 [`factory.ts`](../web/src/lib/factory.ts) 的 `createTextElement` 等构造器，不重新发明一遍元素默认值。
+参数校验用 zod v4（SDK 直接吃 Standard Schema，不需要转换）。**元素词汇表刻意不是 `SlideElement` 的镜像**：那个类型带着渲染和导出需要的一切（`path`、`viewBox`、滤镜矩阵、单元格跨度），让模型填这些等于让它填错。暴露出去的只有属于*决策*的部分——放哪、写什么、什么颜色；其余全部来自编辑器插入按钮用的同一套 [`factory.ts`](../web/src/lib/factory.ts) 构造器，所以 agent 写的幻灯片和人写的是同一种东西。
+
+**几何坐标是必填而非默认。** 工厂会把没告诉它位置的元素居中，这对点"插入"的人是对的，对连写六个元素的模型是错的——它们会叠成一摞。逼模型说出位置，是"布局"和"一堆"的区别。
+
+视频和音频没有词汇表：那是要上传的文件而不是要写的值，本期不搬字节。
 
 ### 文本写入的 sanitize 取舍
 
@@ -341,7 +347,7 @@ web/package.json                          + @modelcontextprotocol/server, zod
 | 1 ✅ | `deck.version` + 条件递增 + 409 + version 端点 | 两个标签页同开一份 deck，改动不再互相吞掉 |
 | 2 ✅ | 编辑器轮询 + 冲突横幅 | 手工 `curl` 改一份 deck，编辑器 4 秒内自己更新 |
 | 3 ✅ | `apiToken` 表 + 校验 + 管理页 | token 能认出用户，且**还打不开 deck API**——那扇门在阶段 4 才开 |
-| 4 | `/api/mcp` + 十个工具 | Claude 连上后能从零建出一份 10 页 deck |
+| 4 ✅ | `/api/mcp` + 十个工具 | 用真 token 走完 initialize → tools/list → 建 deck → 写页 → 读大纲 → 改元素 |
 | 5 | `/preview/[id]` + 自动跳页 | 人开着预览页，看着 agent 一页页写出来 |
 | 6 | 可选：MCP Apps `ui://`、SSE 替换轮询、PPTX 导出 | — |
 
