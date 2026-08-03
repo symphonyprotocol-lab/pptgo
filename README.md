@@ -139,6 +139,36 @@ build needs network access beyond the base
 image: `next/font` downloads Geist, Geist Mono and Fraunces at build time and inlines them,
 so the running container needs no font CDN, but the builder does.
 
+### Continuous deployment
+
+[`ci.yml`](.github/workflows/ci.yml) runs types, lint, tests and the Next build on every
+pull request. [`deploy.yml`](.github/workflows/deploy.yml) takes over on merge to `main`:
+it builds the web image, pushes it to GHCR tagged with the commit, then over SSH pins that
+tag into the server's `.env`, pulls it and restarts the stack. Migrations need no step of
+their own — the image runs them before it listens.
+
+The server is never sent a source tree, only a compose file and a tag, so it needs no
+toolchain and no checkout, and what serves is what CI built. A rollback is one line: set
+`WEB_IMAGE` in the server's `.env` to an earlier tag and `docker compose up -d`.
+
+What the server has to have before the first deploy: Docker, a directory (`/srv/pptgo` by
+default) and a `.env` in it with the secrets. The workflow refuses rather than creating
+one, because a box with no secrets is a box that was never set up.
+
+What the repository has to have:
+
+| Secret | |
+|---|---|
+| `SSH_HOST` · `SSH_USER` | where to connect, and as whom |
+| `SSH_KEY` | the private half of a key that user accepts |
+| `SSH_KNOWN_HOSTS` | the server's public host key — `ssh-keyscan -H <host>`. Pinned rather than accepted on sight, or the deploy key goes to whatever answers on that address |
+
+| Variable | Default |
+|---|---|
+| `DEPLOY_PATH` | `/srv/pptgo` |
+| `PUBLIC_URL` | `https://pptgo.dev` — what the post-deploy check asks for a 200 |
+| `SSH_PORT` | `22` |
+
 ---
 
 ## Repo layout

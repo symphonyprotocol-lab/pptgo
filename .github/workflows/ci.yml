@@ -1,0 +1,52 @@
+# What every pull request has to pass, and what main is re-checked against after a merge.
+#
+# The same four commands a person runs before pushing, in the same order — types, lint,
+# tests, build. The build is here rather than left to the deploy workflow because a type
+# error that only Next's compiler catches should fail on the PR, not after it is merged
+# and already on its way to production.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A second push to the same branch makes the first run's answer worthless, so it is
+# cancelled rather than left to finish. Merges to main are a different ref and queue
+# behind nothing.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          # the version the runtime image is built on, so a syntax level that passes here
+          # cannot fail in the container
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci
+
+      - run: npm run typecheck
+
+      - run: npm run lint
+
+      # the three integration suites skip themselves without DATABASE_URL and S3_ENDPOINT;
+      # everything else runs on the runner as-is
+      - run: npm test
+
+      - run: npm run build

@@ -51,6 +51,12 @@ services:
       - "${RUSTFS_BIND:-127.0.0.1}:${RUSTFS_CONSOLE_PORT:-9101}:9001" # console
 
   web:
+    # Two ways this image comes to exist, and the deployment picks one by setting the
+    # variable. On a server it is the tag CI pushed to GHCR, so `docker compose pull`
+    # fetches a build that already happened and the box needs no source tree and no
+    # toolchain. Left unset — which is every clone — it names the image `docker compose
+    # up --build` produces locally, and nothing about the developer flow changes.
+    image: ${WEB_IMAGE:-pptgo-web:local}
     build:
       context: ./web
     restart: unless-stopped

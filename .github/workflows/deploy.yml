@@ -1,0 +1,174 @@
+# Production, on every merge to main.
+#
+# Two jobs, because building and shipping fail for different reasons and only one of them
+# touches the live site. `image` builds the web container and pushes it to GHCR; `deploy`
+# tells the server which tag to run. If the build breaks, nothing reaches production and
+# the running site is untouched.
+#
+# The server is never handed a source tree. It gets a compose file and an image tag, so
+# the box needs neither a toolchain nor a git checkout, and what runs there is byte for
+# byte what CI built.
+#
+# Database migrations are not a step here: the web image runs `scripts/migrate.mjs` before
+# `server.js` on every start, and the migration is idempotent. Restarting the container is
+# what applies them.
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  # for a rollback, or a re-run after fixing something on the server
+  workflow_dispatch:
+
+# One deploy at a time, and never cancelled halfway: a run that is interrupted between
+# `pull` and `up -d` leaves the server on the old image with a new tag written into .env,
+# which is a confusing place to start debugging from.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      tag: ${{ steps.name.outputs.tag }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Name the image after the commit
+        id: name
+        run: |
+          # lowercase: the registry rejects capitals in a repository name, and an
+          # organisation is free to have them
+          repo=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          echo "tag=ghcr.io/$repo/web:${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+          echo "latest=ghcr.io/$repo/web:latest" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: ./web
+          push: true
+          # the commit tag is what production is pinned to and what a rollback names;
+          # `latest` is for a person poking at the registry by hand
+          tags: |
+            ${{ steps.name.outputs.tag }}
+            ${{ steps.name.outputs.latest }}
+          # one architecture on purpose: the server is amd64, and building arm64 as well
+          # would double the slowest step of this workflow for an image nothing runs
+          platforms: linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: image
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ vars.PUBLIC_URL || 'https://pptgo.dev' }}
+
+    env:
+      IMAGE: ${{ needs.image.outputs.tag }}
+      DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/srv/pptgo' }}
+      SSH_TARGET: ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}
+      SSH_PORT: ${{ vars.SSH_PORT || '22' }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up the SSH key
+        env:
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy
+          chmod 600 ~/.ssh/deploy
+          # pinned rather than accepted on sight: StrictHostKeyChecking=no would hand the
+          # deploy key to whatever answers on that address
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Send the compose file
+        # so a change to the stack — a new service, a new variable — ships with the commit
+        # that made it instead of waiting for someone to edit the server by hand
+        run: |
+          scp -i ~/.ssh/deploy -P "$SSH_PORT" \
+            docker-compose.yml "$SSH_TARGET:$DEPLOY_PATH/docker-compose.yml"
+
+      - name: Log the server in to the registry
+        # the run's own token, valid for minutes, rather than a long-lived PAT sitting in
+        # the server's docker config
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | ssh -i ~/.ssh/deploy -p "$SSH_PORT" "$SSH_TARGET" \
+            "docker login ghcr.io -u ${{ github.actor }} --password-stdin"
+
+      - name: Pull the image and restart
+        run: |
+          ssh -i ~/.ssh/deploy -p "$SSH_PORT" "$SSH_TARGET" \
+            "IMAGE='$IMAGE' DEPLOY_PATH='$DEPLOY_PATH' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd "$DEPLOY_PATH"
+
+          # the secrets live on the server and only there; a deploy that would create this
+          # file is a deploy onto a box that was never set up
+          if [ ! -f .env ]; then
+            echo "no .env in $DEPLOY_PATH — the server needs its secrets before a deploy can land" >&2
+            exit 1
+          fi
+
+          # the tag lives in .env rather than only in this command, so the server stays
+          # able to explain itself: `docker compose up -d` typed by hand next week brings
+          # up the same version, and a rollback is this line edited and one command
+          if grep -q '^WEB_IMAGE=' .env; then
+            sed -i "s|^WEB_IMAGE=.*|WEB_IMAGE=$IMAGE|" .env
+          else
+            printf 'WEB_IMAGE=%s\n' "$IMAGE" >> .env
+          fi
+
+          docker compose pull web
+          # --no-build so a missing image fails loudly here rather than quietly trying to
+          # build from a source tree this box does not have
+          docker compose up -d --no-build
+
+          # says in the log which build is now serving, so a run can be read back later
+          docker compose images web
+
+          docker image prune -f
+          docker logout ghcr.io
+          REMOTE
+
+      - name: Check the site answers
+        # the deploy is not done when the container starts, it is done when the site
+        # serves. The container migrates the database before it listens, so the first few
+        # seconds of refusal are expected rather than a failure
+        env:
+          PUBLIC_URL: ${{ vars.PUBLIC_URL || 'https://pptgo.dev' }}
+        run: |
+          for attempt in $(seq 1 30); do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "$PUBLIC_URL" || echo 000)
+            if [ "$code" = "200" ]; then
+              echo "$PUBLIC_URL answered 200 after ${attempt} attempt(s)"
+              exit 0
+            fi
+            echo "attempt $attempt: $code"
+            sleep 5
+          done
+          echo "::error::$PUBLIC_URL never came back 200 — the old image is still on the server, roll back by setting WEB_IMAGE in $DEPLOY_PATH/.env and running: docker compose up -d"
+          exit 1
