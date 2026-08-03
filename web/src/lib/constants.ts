@@ -1,4 +1,5 @@
-import type { AnimationEffect, DeckTheme, TransitionType } from "@/types/slides"
+import type { MessageKey } from "@/lib/i18n/messages"
+import type { AnimationEffect, ChartType, DeckTheme, TransitionType } from "@/types/slides"
 
 export const VIEWPORT_WIDTH = 1000
 export const VIEWPORT_RATIO = 0.5625
@@ -17,13 +18,18 @@ export const SNAP_THRESHOLD = 4
  */
 export const SINGLE_LINE = 1.2
 
-export const FONT_FAMILIES = [
-  { label: "系统默认", value: "system-ui, sans-serif" },
-  { label: "微软雅黑", value: "'Microsoft YaHei', sans-serif" },
-  { label: "苹方", value: "'PingFang SC', sans-serif" },
-  { label: "宋体", value: "SimSun, serif" },
-  { label: "黑体", value: "SimHei, sans-serif" },
-  { label: "楷体", value: "KaiTi, serif" },
+/**
+ * Pickable typefaces. The CJK families carry a message key because their names are
+ * themselves Chinese words — an English reader wants "SimSun", not 宋体 — while the Latin
+ * families are proper nouns that read the same in both languages and stay literal.
+ */
+export const FONT_FAMILIES: { labelKey?: MessageKey; label?: string; value: string }[] = [
+  { labelKey: "font.system", value: "system-ui, sans-serif" },
+  { labelKey: "font.yahei", value: "'Microsoft YaHei', sans-serif" },
+  { labelKey: "font.pingfang", value: "'PingFang SC', sans-serif" },
+  { labelKey: "font.simsun", value: "SimSun, serif" },
+  { labelKey: "font.simhei", value: "SimHei, sans-serif" },
+  { labelKey: "font.kaiti", value: "KaiTi, serif" },
   { label: "Arial", value: "Arial, sans-serif" },
   { label: "Helvetica", value: "Helvetica, Arial, sans-serif" },
   { label: "Georgia", value: "Georgia, serif" },
@@ -47,35 +53,39 @@ export const DEFAULT_THEME: DeckTheme = {
   themeColors: ["#2563eb", "#7c3aed", "#db2777", "#ea580c", "#16a34a", "#0891b2"],
 }
 
-export const TRANSITIONS: { value: TransitionType; label: string }[] = [
-  { value: "none", label: "无" },
-  { value: "fade", label: "淡入淡出" },
-  { value: "slideX", label: "左右滑动" },
-  { value: "slideY", label: "上下滑动" },
-  { value: "zoom", label: "缩放" },
+export const TRANSITIONS: { value: TransitionType; labelKey: MessageKey }[] = [
+  { value: "none", labelKey: "transition.none" },
+  { value: "fade", labelKey: "transition.fade" },
+  { value: "slideX", labelKey: "transition.slideX" },
+  { value: "slideY", labelKey: "transition.slideY" },
+  { value: "zoom", labelKey: "transition.zoom" },
 ]
 
-export const ANIMATIONS: { value: AnimationEffect; label: string; type: "in" | "out" | "attention" }[] = [
-  { value: "fadeIn", label: "淡入", type: "in" },
-  { value: "slideInUp", label: "上滑进入", type: "in" },
-  { value: "slideInDown", label: "下滑进入", type: "in" },
-  { value: "slideInLeft", label: "左滑进入", type: "in" },
-  { value: "slideInRight", label: "右滑进入", type: "in" },
-  { value: "zoomIn", label: "放大进入", type: "in" },
-  { value: "rotateIn", label: "旋转进入", type: "in" },
-  { value: "fadeOut", label: "淡出", type: "out" },
-  { value: "zoomOut", label: "缩小退出", type: "out" },
-  { value: "pulse", label: "强调脉冲", type: "attention" },
-  { value: "shake", label: "强调抖动", type: "attention" },
+export const ANIMATIONS: {
+  value: AnimationEffect
+  labelKey: MessageKey
+  type: "in" | "out" | "attention"
+}[] = [
+  { value: "fadeIn", labelKey: "anim.fadeIn", type: "in" },
+  { value: "slideInUp", labelKey: "anim.slideInUp", type: "in" },
+  { value: "slideInDown", labelKey: "anim.slideInDown", type: "in" },
+  { value: "slideInLeft", labelKey: "anim.slideInLeft", type: "in" },
+  { value: "slideInRight", labelKey: "anim.slideInRight", type: "in" },
+  { value: "zoomIn", labelKey: "anim.zoomIn", type: "in" },
+  { value: "rotateIn", labelKey: "anim.rotateIn", type: "in" },
+  { value: "fadeOut", labelKey: "anim.fadeOut", type: "out" },
+  { value: "zoomOut", labelKey: "anim.zoomOut", type: "out" },
+  { value: "pulse", labelKey: "anim.pulse", type: "attention" },
+  { value: "shake", labelKey: "anim.shake", type: "attention" },
 ]
 
-export const CHART_TYPES = [
-  { value: "column", label: "柱状图" },
-  { value: "bar", label: "条形图" },
-  { value: "line", label: "折线图" },
-  { value: "area", label: "面积图" },
-  { value: "scatter", label: "散点图" },
-  { value: "pie", label: "饼图" },
-  { value: "doughnut", label: "环形图" },
-  { value: "radar", label: "雷达图" },
-] as const
+export const CHART_TYPES: { value: ChartType; labelKey: MessageKey }[] = [
+  { value: "column", labelKey: "chart.column" },
+  { value: "bar", labelKey: "chart.bar" },
+  { value: "line", labelKey: "chart.line" },
+  { value: "area", labelKey: "chart.area" },
+  { value: "scatter", labelKey: "chart.scatter" },
+  { value: "pie", labelKey: "chart.pie" },
+  { value: "doughnut", labelKey: "chart.doughnut" },
+  { value: "radar", labelKey: "chart.radar" },
+]

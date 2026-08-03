@@ -13,6 +13,7 @@ import {
   newId,
 } from "./factory"
 import { escapeHtml } from "./sanitize"
+import { fallbackTranslate, type Translate } from "./i18n/translate"
 import { SHAPE_LIST, SHAPE_MAP } from "./shapes"
 import type {
   AlignHorizontal,
@@ -63,6 +64,7 @@ interface ChartSpec {
 }
 
 interface Ctx {
+  t: Translate
   /** EMU -> canvas units, uniform so the slide keeps its aspect ratio */
   scale: number
   offsetX: number
@@ -76,12 +78,28 @@ interface Ctx {
   charts: Map<string, ChartSpec>
 }
 
-export async function importPptx(file: File): Promise<Deck> {
+/**
+ * A .pptx is an untrusted archive: every number in it is attacker-controlled, and the
+ * whole thing is decoded in the reader's own tab. These are the ceilings that keep a
+ * malformed or hostile file from taking the tab down with it.
+ */
+const MAX_PPTX_BYTES = 100 * 1024 * 1024
+const MAX_SLIDES = 500
+/** Total decoded media. Each image also becomes a base64 data URI, which is ~4/3 of this. */
+const MAX_MEDIA_BYTES = 60 * 1024 * 1024
+/** Cached chart points are addressed by `idx`; a sparse array is only cheap while it is small. */
+const MAX_CHART_POINTS = 4096
+
+export async function importPptx(file: File, t: Translate = fallbackTranslate): Promise<Deck> {
+  if (file.size > MAX_PPTX_BYTES) {
+    throw new Error(t("error.pptxTooLarge", { limit: formatBytes(MAX_PPTX_BYTES) }))
+  }
+
   const { default: JSZipCtor } = await import("jszip")
   const zip = await JSZipCtor.loadAsync(file)
 
   const presentation = await readXml(zip, "ppt/presentation.xml")
-  if (!presentation) throw new Error("这不是一个有效的 PPTX 文件")
+  if (!presentation) throw new Error(t("error.pptxInvalid"))
 
   const sldSz = first(presentation, "p:sldSz")
   const cx = Number(sldSz?.getAttribute("cx")) || 12192000
@@ -91,8 +109,8 @@ export async function importPptx(file: File): Promise<Deck> {
   const offsetY = (VIEWPORT_HEIGHT - cy * scale) / 2
 
   const media = await readMedia(zip)
-  const slidePaths = await resolveSlideOrder(zip, presentation)
-  if (!slidePaths.length) throw new Error("这个 PPTX 里没有找到幻灯片")
+  const slidePaths = (await resolveSlideOrder(zip, presentation)).slice(0, MAX_SLIDES)
+  if (!slidePaths.length) throw new Error(t("error.pptxNoSlides"))
 
   const themeCache = new Map<string, Record<string, string>>()
 
@@ -102,13 +120,14 @@ export async function importPptx(file: File): Promise<Deck> {
     if (!xml) continue
     const rels = await readRels(zip, path)
     const ctx: Ctx = {
+      t,
       scale,
       offsetX,
       offsetY,
       rels,
       media,
       theme: await resolveTheme(zip, path, themeCache),
-      charts: await readCharts(zip, rels),
+      charts: await readCharts(zip, rels, t),
     }
     slides.push({
       ...createSlide(),
@@ -121,7 +140,7 @@ export async function importPptx(file: File): Promise<Deck> {
 
   return {
     version: 1,
-    title: file.name.replace(/\.pptx$/i, "") || "导入的演示文稿",
+    title: file.name.replace(/\.pptx$/i, "") || t("deck.imported"),
     width: VIEWPORT_WIDTH,
     height: VIEWPORT_HEIGHT,
     theme: DEFAULT_THEME,
@@ -154,6 +173,13 @@ async function readRels(zip: JSZip, slidePath: string) {
   return map
 }
 
+/**
+ * Formats a browser will actually paint. EMF and WMF are common in decks authored on
+ * Windows and used to be carried through as `image/emf` / `image/wmf`, which no browser
+ * renders — the import "succeeded" and produced a slide of broken-image icons. Leaving
+ * them out drops the picture, which at least looks like something missing rather than
+ * something corrupt.
+ */
 const MIME: Record<string, string> = {
   png: "image/png",
   jpg: "image/jpeg",
@@ -162,23 +188,43 @@ const MIME: Record<string, string> = {
   bmp: "image/bmp",
   webp: "image/webp",
   svg: "image/svg+xml",
-  tiff: "image/tiff",
-  emf: "image/emf",
-  wmf: "image/wmf",
 }
 
-/** Every embedded image, inlined as a data URI so the deck stays self-contained. */
+/**
+ * Every embedded image, inlined as a data URI so the deck stays self-contained.
+ *
+ * Bounded in total, not per file: the deck this builds has to fit through a 25MB save,
+ * and decoding an unbounded archive into base64 in the reader's tab is a way to be handed
+ * an out-of-memory crash by a file someone emailed them.
+ */
 async function readMedia(zip: JSZip): Promise<Map<string, string>> {
   const media = new Map<string, string>()
   const entries = zip.file(/^ppt\/media\//)
+  let budget = MAX_MEDIA_BYTES
   for (const entry of entries) {
     const ext = entry.name.split(".").pop()?.toLowerCase() ?? ""
     const mime = MIME[ext]
     if (!mime) continue
     const base64 = await entry.async("base64")
+    // base64 carries 3 bytes per 4 characters
+    const bytes = Math.floor((base64.length * 3) / 4)
+    if (bytes > budget) continue
+    budget -= bytes
     media.set(entry.name.split("/").pop()!, `data:${mime};base64,${base64}`)
   }
   return media
+}
+
+const UNITS = ["B", "KB", "MB", "GB"]
+
+export function formatBytes(bytes: number): string {
+  let value = bytes
+  let unit = 0
+  while (value >= 1024 && unit < UNITS.length - 1) {
+    value /= 1024
+    unit += 1
+  }
+  return `${Math.round(value * 10) / 10}${UNITS[unit]}`
 }
 
 async function resolveSlideOrder(zip: JSZip, presentation: Element): Promise<string[]> {
@@ -274,18 +320,19 @@ const CHART_TAGS: { tag: string; type: ChartType }[] = [
 async function readCharts(
   zip: JSZip,
   rels: Map<string, { type: string; target: string }>,
+  t: Translate,
 ): Promise<Map<string, ChartSpec>> {
   const charts = new Map<string, ChartSpec>()
   for (const [id, rel] of rels) {
     if (rel.type !== "chart") continue
     const xml = await readXml(zip, normalizePath(rel.target))
-    const spec = xml ? readChart(xml) : null
+    const spec = xml ? readChart(xml, t) : null
     if (spec) charts.set(id, spec)
   }
   return charts
 }
 
-function readChart(xml: Element): ChartSpec | null {
+function readChart(xml: Element, t: Translate): ChartSpec | null {
   const plot = first(xml, "c:plotArea")
   if (!plot) return null
 
@@ -300,7 +347,8 @@ function readChart(xml: Element): ChartSpec | null {
   let categories: string[] = []
   const series = children(node, "c:ser").map((ser, index) => {
     const name =
-      first(first(ser, "c:tx") ?? ser, "c:v")?.textContent?.trim() || `系列 ${index + 1}`
+      first(first(ser, "c:tx") ?? ser, "c:v")?.textContent?.trim() ||
+      t("chart.series", { n: index + 1 })
 
     const cats = cachedPoints(first(ser, "c:cat"))
     if (cats.length > categories.length) categories = cats
@@ -314,7 +362,7 @@ function readChart(xml: Element): ChartSpec | null {
 
   if (!series.length) return null
   if (!categories.length) {
-    categories = series[0].values.map((_, i) => `类别 ${i + 1}`)
+    categories = series[0].values.map((_, i) => t("chart.category", { n: i + 1 }))
   }
 
   return {
@@ -324,16 +372,25 @@ function readChart(xml: Element): ChartSpec | null {
   }
 }
 
-/** Cached values keep their index, so a sparse `c:pt` list still lines up with its categories. */
+/**
+ * Cached values keep their index, so a sparse `c:pt` list still lines up with its
+ * categories.
+ *
+ * `idx` comes out of the file, so it is clamped. Writing straight to `values[idx]` made
+ * `<c:pt idx="999999999">` allocate a billion-slot array on the next `Array.from`, which
+ * is a crashed tab from a single attribute in a file the reader only meant to open.
+ */
 function cachedPoints(container: Element | null): string[] {
   if (!container) return []
   const points = all(container, "c:pt")
   if (!points.length) return []
   const values: string[] = []
   for (const point of points) {
-    const index = Number(point.getAttribute("idx") ?? values.length)
-    const value = first(point, "c:v")?.textContent ?? ""
-    values[Number.isFinite(index) ? index : values.length] = value
+    const raw = Number(point.getAttribute("idx") ?? values.length)
+    const index =
+      Number.isInteger(raw) && raw >= 0 && raw < MAX_CHART_POINTS ? raw : values.length
+    if (index >= MAX_CHART_POINTS) break
+    values[index] = first(point, "c:v")?.textContent ?? ""
   }
   return Array.from(values, (value) => value ?? "")
 }
@@ -917,6 +974,11 @@ function readPicture(
   }
 }
 
+const span = (value: string | null) => {
+  const parsed = Number(value ?? 1)
+  return Number.isInteger(parsed) && parsed >= 1 ? Math.min(parsed, 1000) : 1
+}
+
 const pct = (value: string | null) => {
   const parsed = Number(value ?? 0) / 100000
   return Number.isFinite(parsed) ? Math.max(0, Math.min(1, parsed)) : 0
@@ -1005,8 +1067,9 @@ function readTable(
       const text = all(tc, "a:t").map((t) => t.textContent ?? "").join("")
       const fill = colorOf(first(tc, "a:solidFill"), theme)
       return createTableCell(text, {
-        colspan: Number(tc.getAttribute("gridSpan") ?? 1),
-        rowspan: Number(tc.getAttribute("rowSpan") ?? 1),
+        // a span is a count, and a NaN one reaches React's `colSpan` and the export
+        colspan: span(tc.getAttribute("gridSpan")),
+        rowspan: span(tc.getAttribute("rowSpan")),
         merged: tc.getAttribute("hMerge") === "1" || tc.getAttribute("vMerge") === "1",
         fill,
       })

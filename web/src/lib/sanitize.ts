@@ -8,8 +8,21 @@ const ALLOWED_TAGS = new Set([
 const DROP_TAGS = new Set([
   "SCRIPT", "STYLE", "IFRAME", "OBJECT", "EMBED", "LINK", "META", "BASE", "FORM", "INPUT",
   "BUTTON", "TEXTAREA", "SELECT", "NOSCRIPT", "TEMPLATE", "SVG", "MATH", "AUDIO", "VIDEO",
-  "SOURCE", "TRACK", "CANVAS",
+  "SOURCE", "TRACK", "CANVAS", "IMG", "APPLET", "FRAME", "FRAMESET", "PORTAL",
 ])
+
+/**
+ * Elements the HTML parser put in the SVG or MathML namespace go with their subtree,
+ * whatever they are called.
+ *
+ * The `DROP_TAGS` entries above cannot catch them on their own: `tagName` preserves the
+ * author's case for foreign content, so `<svg>` arrives as `"svg"` and misses a set of
+ * upper-case names. They happened to be unwrapped instead — but foreign content is
+ * exactly where the parse/serialise round trip below stops being an identity (an
+ * `<annotation-xml>` or `<mglyph>` can flip the parsing context on the way back in), so
+ * they are cut out by namespace rather than left to a name comparison.
+ */
+const HTML_NAMESPACE = "http://www.w3.org/1999/xhtml"
 
 const ATTRS_BY_TAG: Record<string, Set<string>> = {
   A: new Set(["href", "style"]),
@@ -22,19 +35,55 @@ const UNSAFE_STYLE = /url\s*\(|expression\s*\(|javascript\s*:|behaviou?r\s*:|-mo
 const SAFE_HREF = /^(https?:|mailto:|tel:|#)/i
 
 /**
+ * How many times the scrub is repeated before its output is treated as untrustworthy.
+ * A clean fragment reaches a fixed point on the second pass; three is slack, not a budget.
+ */
+const MAX_PASSES = 3
+
+/**
  * Rich-text content is stored as HTML and re-rendered with `dangerouslySetInnerHTML`,
- * so anything arriving from an imported file, a paste or localStorage has to be scrubbed.
+ * so anything arriving from an imported file, a paste or storage has to be scrubbed.
  *
  * Disallowed tags are unwrapped rather than dropped so their text survives — which puts the
  * promoted children at a position the walk has already passed. They are re-entered rather
  * than skipped, otherwise `<article><img onerror=...>` would slip through untouched.
+ *
+ * The scrub is then repeated until the markup stops changing. One pass only proves the
+ * *parsed tree* was safe; what gets stored and later re-parsed is the serialisation of it,
+ * and markup that serialises to something that parses differently is the whole mutation-XSS
+ * family. Re-scrubbing is how that difference is caught: a fragment that will not settle
+ * within `MAX_PASSES` is reduced to its text, which cannot mutate into anything.
+ *
+ * Throws outside the browser rather than returning "". This needs a DOM, and every caller
+ * is handling text the user typed — quietly handing back an empty string would erase a
+ * deck's contents and look like a successful save.
  */
 export function sanitizeHtml(html: string): string {
-  if (typeof window === "undefined") return ""
+  if (typeof window === "undefined") {
+    throw new Error("sanitizeHtml needs a DOM — call it from the browser")
+  }
+  if (!html) return ""
+
+  let current = scrubOnce(html)
+  for (let pass = 1; pass < MAX_PASSES; pass += 1) {
+    const next = scrubOnce(current)
+    if (next === current) return current
+    current = next
+  }
+  return escapeHtml(textOf(current))
+}
+
+function scrubOnce(html: string): string {
   const template = document.createElement("template")
   template.innerHTML = html
   scrub(template.content)
   return template.innerHTML
+}
+
+function textOf(html: string): string {
+  const template = document.createElement("template")
+  template.innerHTML = html
+  return template.content.textContent ?? ""
 }
 
 function scrub(root: ParentNode) {
@@ -54,28 +103,31 @@ function scrub(root: ParentNode) {
 
     const el = node as Element
     const next: ChildNode | null = el.nextSibling
+    // foreign content preserves the author's case, so this is the only comparison that
+    // treats `<svg>` and `<SVG>` as the same tag
+    const tag = el.tagName.toUpperCase()
 
-    if (DROP_TAGS.has(el.tagName)) {
+    if (el.namespaceURI !== HTML_NAMESPACE || DROP_TAGS.has(tag)) {
       el.remove()
       node = next
       continue
     }
 
-    if (!ALLOWED_TAGS.has(el.tagName)) {
+    if (!ALLOWED_TAGS.has(tag)) {
       const promoted = Array.from(el.childNodes)
       el.replaceWith(...promoted)
       node = promoted[0] ?? next
       continue
     }
 
-    scrubAttributes(el)
+    scrubAttributes(el, tag)
     scrub(el)
     node = next
   }
 }
 
-function scrubAttributes(el: Element) {
-  const allowed = ATTRS_BY_TAG[el.tagName] ?? DEFAULT_ATTRS
+function scrubAttributes(el: Element, tag: string) {
+  const allowed = ATTRS_BY_TAG[tag] ?? DEFAULT_ATTRS
   for (const attr of Array.from(el.attributes)) {
     const name = attr.name.toLowerCase()
     const value = attr.value
@@ -95,7 +147,7 @@ function scrubAttributes(el: Element) {
       el.removeAttribute(attr.name)
     }
   }
-  if (el.tagName === "A") {
+  if (tag === "A") {
     el.setAttribute("target", "_blank")
     el.setAttribute("rel", "noopener noreferrer")
   }

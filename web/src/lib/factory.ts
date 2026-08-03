@@ -1,11 +1,13 @@
 import { nanoid } from "nanoid"
-import { DEFAULT_THEME, VIEWPORT_HEIGHT, VIEWPORT_WIDTH } from "./constants"
+import { DEFAULT_THEME, MIN_ELEMENT_SIZE, VIEWPORT_HEIGHT, VIEWPORT_WIDTH } from "./constants"
 import { normalizeRotate } from "./geometry"
 import { sanitizeHtml } from "./sanitize"
 import { SHAPE_MAP, shapeKeyFromPath } from "./shapes"
+import { fallbackTranslate, type Translate } from "./i18n/translate"
 import type {
   ChartElement,
   Deck,
+  ElementLink,
   FormulaElement,
   ImageElement,
   LineElement,
@@ -42,13 +44,15 @@ export function createTextElement(partial: Partial<TextElement> = {}): TextEleme
   return {
     id: newId(),
     type: "text",
-    name: "文本",
+    name: "",
     left: 100,
     top: 100,
     width: 400,
     height: 60,
     rotate: 0,
-    content: "双击编辑文字",
+    // callers that create a text box for the user pass the localised prompt; the
+    // factory itself stays language-free so nothing Chinese reaches a deck by default
+    content: "",
     fontFamily: DEFAULT_THEME.fontFamily,
     fontSize: 24,
     color: DEFAULT_THEME.fontColor,
@@ -74,7 +78,7 @@ export function createShapeElement(
   return {
     id: newId(),
     type: "shape",
-    name: def.label,
+    name: "",
     left: 100,
     top: 100,
     width: 200,
@@ -98,7 +102,7 @@ export function createImageElement(
   return {
     id: newId(),
     type: "image",
-    name: "图片",
+    name: "",
     left: (VIEWPORT_WIDTH - width) / 2,
     top: (VIEWPORT_HEIGHT - height) / 2,
     width,
@@ -118,7 +122,7 @@ export function createLineElement(partial: Partial<LineElement> = {}): LineEleme
   return {
     id: newId(),
     type: "line",
-    name: "线条",
+    name: "",
     left: 100,
     top: 100,
     width: 200,
@@ -143,16 +147,19 @@ export function createTableElement(
   rowCount = 3,
   colCount = 3,
   partial: Partial<TableElement> = {},
+  t: Translate = fallbackTranslate,
 ): TableElement {
   const rows = Array.from({ length: rowCount }, (_, r) =>
-    Array.from({ length: colCount }, (_, c) => createTableCell(r === 0 ? `列 ${c + 1}` : "")),
+    Array.from({ length: colCount }, (_, c) =>
+      createTableCell(r === 0 ? t("table.column", { n: c + 1 }) : ""),
+    ),
   )
   const width = Math.min(700, colCount * 160)
   const height = rowCount * 44
   return {
     id: newId(),
     type: "table",
-    name: "表格",
+    name: "",
     left: (VIEWPORT_WIDTH - width) / 2,
     top: (VIEWPORT_HEIGHT - height) / 2,
     width,
@@ -168,13 +175,16 @@ export function createTableElement(
   }
 }
 
-export function createChartElement(partial: Partial<ChartElement> = {}): ChartElement {
+export function createChartElement(
+  partial: Partial<ChartElement> = {},
+  t: Translate = fallbackTranslate,
+): ChartElement {
   const width = 520
   const height = 320
   return {
     id: newId(),
     type: "chart",
-    name: "图表",
+    name: "",
     left: (VIEWPORT_WIDTH - width) / 2,
     top: (VIEWPORT_HEIGHT - height) / 2,
     width,
@@ -182,10 +192,15 @@ export function createChartElement(partial: Partial<ChartElement> = {}): ChartEl
     rotate: 0,
     chartType: "column",
     data: {
-      categories: ["一季度", "二季度", "三季度", "四季度"],
+      categories: [
+        t("chart.sampleQ1"),
+        t("chart.sampleQ2"),
+        t("chart.sampleQ3"),
+        t("chart.sampleQ4"),
+      ],
       series: [
-        { name: "系列 1", values: [32, 48, 40, 62] },
-        { name: "系列 2", values: [20, 30, 52, 38] },
+        { name: t("chart.series", { n: 1 }), values: [32, 48, 40, 62] },
+        { name: t("chart.series", { n: 2 }), values: [20, 30, 52, 38] },
       ],
     },
     themeColors: DEFAULT_THEME.themeColors,
@@ -208,7 +223,7 @@ export function createMediaElement(
   return {
     id: newId(),
     type,
-    name: type === "video" ? "视频" : "音频",
+    name: "",
     left: (VIEWPORT_WIDTH - width) / 2,
     top: (VIEWPORT_HEIGHT - height) / 2,
     width,
@@ -227,7 +242,7 @@ export function createFormulaElement(partial: Partial<FormulaElement> = {}): For
   return {
     id: newId(),
     type: "formula",
-    name: "公式",
+    name: "",
     left: (VIEWPORT_WIDTH - width) / 2,
     top: (VIEWPORT_HEIGHT - height) / 2,
     width,
@@ -255,56 +270,136 @@ export function createSlide(partial: Partial<Slide> = {}): Slide {
  * Brings a deck read from disk or localStorage up to the current model: scrubs rich text,
  * backfills fields added after it was written, and clamps values the editor now relies on.
  */
-export function normalizeDeck(raw: Deck): Deck {
+export function normalizeDeck(raw: Deck, t: Translate = fallbackTranslate): Deck {
   const slides = (Array.isArray(raw.slides) ? raw.slides : []).map((slide) => ({
     ...createSlide(),
     ...slide,
     id: slide.id || newId(),
-    elements: (Array.isArray(slide.elements) ? slide.elements : []).map(normalizeElement),
-    animations: (slide.animations ?? []).filter((a) => a && a.elId),
+    elements: (Array.isArray(slide.elements) ? slide.elements : [])
+      .map((el) => normalizeElement(el))
+      .filter((el): el is SlideElement => el !== null),
+    animations: (Array.isArray(slide.animations) ? slide.animations : []).filter(
+      (a) => a && a.elId,
+    ),
   }))
 
   return {
     version: 1,
-    title: typeof raw.title === "string" ? raw.title : "未命名演示文稿",
+    title: typeof raw.title === "string" ? raw.title : t("deck.untitled"),
     width: VIEWPORT_WIDTH,
     height: VIEWPORT_HEIGHT,
     theme: { ...DEFAULT_THEME, ...(raw.theme ?? {}) },
-    slides: slides.length ? slides : createDeck().slides,
+    slides: slides.length ? slides : createDeck(t).slides,
   }
 }
 
-function normalizeElement(el: SlideElement): SlideElement {
-  const base = {
-    ...el,
-    id: el.id || newId(),
-    rotate: normalizeRotate(Number(el.rotate) || 0),
-    // decks written before links were structured stored a bare url string
-    link:
-      typeof (el as { link?: unknown }).link === "string"
-        ? { type: "web" as const, target: (el as unknown as { link: string }).link }
-        : el.link,
+/**
+ * Names the factories used to stamp onto every element before element labels became a
+ * render-time lookup. They are not something anyone typed — there has never been a UI for
+ * naming an element — so a stored one is a fossil of the language the app shipped in, and
+ * a deck built last year would otherwise keep showing Chinese in the layer panel of an
+ * English reader forever. Clearing them lets the label resolve per render like a new
+ * element's does.
+ */
+const LEGACY_NAMES = new Set([
+  "文本", "图片", "形状", "线条", "表格", "图表", "视频", "音频", "公式", "手绘",
+  "矩形", "圆角矩形", "椭圆", "三角形", "直角三角形", "菱形", "平行四边形", "梯形",
+  "五边形", "六边形", "八边形", "五角星", "四角星", "六角星", "右箭头", "左箭头",
+  "上箭头", "下箭头", "双向箭头", "V 形", "十字", "心形", "对话框", "云朵", "圆柱",
+  "流程", "判断", "起止",
+])
+
+const ELEMENT_TYPES = new Set<string>([
+  "text", "image", "shape", "line", "table", "chart", "video", "audio", "formula",
+])
+
+/** Only schemes a hyperlink may carry; anything else (`javascript:`, `data:`) is dropped. */
+const SAFE_LINK = /^(https?:|mailto:|tel:)/i
+
+const object = (value: unknown): Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {}
+
+const num = (value: unknown, fallback: number): number => {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : fallback
+}
+
+const text = (value: unknown): string => (typeof value === "string" ? value : "")
+
+const legacyFreeName = (name: string) => (LEGACY_NAMES.has(name) ? "" : name.slice(0, 120))
+
+function normalizeLink(value: unknown): ElementLink | undefined {
+  // decks written before links were structured stored a bare url string
+  if (typeof value === "string") {
+    return SAFE_LINK.test(value.trim()) ? { type: "web", target: value.trim() } : undefined
   }
+  const link = object(value)
+  const target = text(link.target).trim()
+  if (!target) return undefined
+  if (link.type === "slide") return { type: "slide", target }
+  return SAFE_LINK.test(target) ? { type: "web", target } : undefined
+}
+
+/**
+ * Brings one element up to the current model. This is the only gate between untrusted
+ * markup and `dangerouslySetInnerHTML`, so it is written to survive input that is not an
+ * element at all: a deck arrives from storage, an import, a `.json` file or the system
+ * clipboard, and none of those are the editor's own output just because they claim to be.
+ *
+ * Returns null for anything whose type is not one the renderer knows — `ElementView`
+ * switches on it exhaustively and would render nothing while the element still occupied
+ * the slide, the layer panel and the export.
+ */
+export function normalizeElement(raw: unknown): SlideElement | null {
+  const source = object(raw)
+  if (!ELEMENT_TYPES.has(text(source.type))) return null
+
+  const base = {
+    ...source,
+    id: text(source.id) || newId(),
+    name: legacyFreeName(text(source.name)),
+    left: num(source.left, 0),
+    top: num(source.top, 0),
+    width: Math.max(MIN_ELEMENT_SIZE, num(source.width, 200)),
+    height: Math.max(MIN_ELEMENT_SIZE, num(source.height, 100)),
+    rotate: normalizeRotate(num(source.rotate, 0)),
+    link: normalizeLink(source.link),
+  } as SlideElement
 
   if (base.type === "text") {
-    return { ...base, content: sanitizeHtml(base.content ?? "") }
+    return { ...base, content: sanitizeHtml(text(base.content)) }
   }
   if (base.type === "shape") {
     const key = base.shapeKey ?? shapeKeyFromPath(base.path) ?? "rect"
     const def = SHAPE_MAP.get(key)
+    const shapeText = object(base.text)
     return {
       ...base,
       // freehand and imported shapes carry a key with no preset behind it; keeping the key
       // is what lets export treat them as bespoke geometry instead of a rectangle
       shapeKey: def ? def.key : key,
       // keep any custom path that came from an import, otherwise re-derive
-      path: base.path || def?.path || SHAPE_MAP.get("rect")!.path,
-      viewBox: base.viewBox || def?.viewBox || 200,
-      text: { ...defaultShapeText(), ...base.text, content: sanitizeHtml(base.text?.content ?? "") },
+      path: text(base.path) || def?.path || SHAPE_MAP.get("rect")!.path,
+      viewBox: num(base.viewBox, 0) || def?.viewBox || 200,
+      text: {
+        ...defaultShapeText(),
+        ...shapeText,
+        content: sanitizeHtml(text(shapeText.content)),
+      },
     }
   }
   if (base.type === "table") {
-    const rows = (base.rows ?? []).map((row) => row.map((cell) => ({ ...createTableCell(), ...cell })))
+    const rows = (Array.isArray(base.rows) ? base.rows : []).map((row) =>
+      (Array.isArray(row) ? row : []).map((cell) => ({
+        ...createTableCell(),
+        ...object(cell),
+        // cells are plain text; markup here would be rendered as text but still travels
+        // into the export, so it is flattened rather than trusted
+        text: text(object(cell).text),
+      })),
+    )
     const colCount = rows[0]?.length ?? 1
     const widths =
       base.colWidths?.length === colCount
@@ -315,12 +410,26 @@ function normalizeElement(el: SlideElement): SlideElement {
   return base
 }
 
-export function createDeck(): Deck {
+/**
+ * Elements arriving over the system clipboard. They carry the editor's own marker, but a
+ * marker is not provenance — any page can put one on the clipboard — so they go through
+ * the same gate a stored deck does, and get fresh ids because the originals may still be
+ * on this slide.
+ */
+export function normalizeIncomingElements(value: unknown): SlideElement[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((candidate) => normalizeElement(candidate))
+    .filter((el): el is SlideElement => el !== null)
+    .map((el) => ({ ...el, id: newId() }))
+}
+
+export function createDeck(t: Translate = fallbackTranslate): Deck {
   const cover = createSlide({
     background: { type: "solid", color: "#0f172a" },
     elements: [
       createTextElement({
-        content: "PPTGo 在线演示文稿",
+        content: t("deck.sampleTitle"),
         left: 100,
         top: 200,
         width: 800,
@@ -331,7 +440,7 @@ export function createDeck(): Deck {
         align: "center",
       }),
       createTextElement({
-        content: "浏览器里编辑幻灯片，导出为 PPTX",
+        content: t("deck.sampleSubtitle"),
         left: 100,
         top: 305,
         width: 800,
@@ -355,7 +464,7 @@ export function createDeck(): Deck {
   const second = createSlide({
     elements: [
       createTextElement({
-        content: "从这里开始",
+        content: t("deck.sampleHeading"),
         left: 70,
         top: 60,
         width: 500,
@@ -364,8 +473,7 @@ export function createDeck(): Deck {
         bold: true,
       }),
       createTextElement({
-        content:
-          "左侧插入文字、形状、图片、表格和图表<br>拖拽移动，拉动控制点缩放，双击输入内容<br>右侧面板调整样式，顶部可撤销、播放和导出",
+        content: t("deck.sampleBody"),
         left: 70,
         top: 150,
         width: 520,
@@ -380,14 +488,14 @@ export function createDeck(): Deck {
         width: 290,
         height: 320,
         fill: "#2563eb",
-        text: defaultShapeText({ content: "形状也能写字", fontSize: 22, bold: true }),
+        text: defaultShapeText({ content: t("deck.sampleShape"), fontSize: 22, bold: true }),
       }),
     ],
   })
 
   return {
     version: 1,
-    title: "未命名演示文稿",
+    title: t("deck.untitled"),
     width: VIEWPORT_WIDTH,
     height: VIEWPORT_HEIGHT,
     theme: DEFAULT_THEME,

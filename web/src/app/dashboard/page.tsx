@@ -4,9 +4,11 @@ import { DeckGrid } from "@/components/dashboard/deck-grid"
 import { UserMenu } from "@/components/dashboard/user-menu"
 import { Wordmark } from "@/components/site/wordmark"
 import { listDecks } from "@/lib/decks"
+import { getLocale } from "@/lib/i18n/server"
+import { translator } from "@/lib/i18n/translate"
 
-export const metadata = {
-  title: "我的演示文稿 · PPTGo",
+export async function generateMetadata() {
+  return { title: translator(await getLocale())("dashboard.metaTitle") }
 }
 
 // decks change on every autosave; a cached dashboard would show stale tiles
@@ -16,6 +18,7 @@ export default async function DashboardPage() {
   const user = await currentUser()
   if (!user) redirect("/login?next=/dashboard")
 
+  const t = translator(await getLocale())
   const decks = await listDecks(user.id)
   const slides = decks.reduce((total, deck) => total + deck.slideCount, 0)
 
@@ -32,14 +35,14 @@ export default async function DashboardPage() {
         <div className="flex flex-col gap-4 border-b border-foreground/20 pb-6 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="font-mono text-[11px] tracking-[0.28em] text-primary uppercase">
-              Workspace
+              {t("dashboard.kicker")}
             </p>
             <h1 className="mt-3 text-3xl font-black tracking-[-0.03em] sm:text-4xl">
-              我的演示文稿
+              {t("dashboard.heading")}
             </h1>
           </div>
           <p className="font-mono text-[11px] tracking-[0.2em] text-muted-foreground uppercase">
-            {decks.length} decks · {slides} slides
+            {t("dashboard.counts", { decks: decks.length, slides })}
           </p>
         </div>
 

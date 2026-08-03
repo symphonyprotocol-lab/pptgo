@@ -10,7 +10,7 @@ import {
 
 function required(name: string): string {
   const value = process.env[name]
-  if (!value) throw new Error(`缺少环境变量 ${name}`)
+  if (!value) throw new Error(`missing environment variable ${name}`)
   return value
 }
 

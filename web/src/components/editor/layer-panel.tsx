@@ -19,7 +19,10 @@ import {
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { htmlToPlainText } from "@/lib/sanitize"
+import { elementLabel } from "@/lib/element-label"
+import { useT } from "@/lib/i18n/client"
 import { useEditor } from "@/store/editor"
+import type { Translate } from "@/lib/i18n/translate"
 import type { SlideElement } from "@/types/slides"
 
 const ICONS = {
@@ -34,16 +37,17 @@ const ICONS = {
   formula: Sigma,
 } as const
 
-function labelOf(el: SlideElement): string {
+function labelOf(el: SlideElement, t: Translate): string {
   if (el.type === "text") {
     const text = htmlToPlainText(el.content).trim().replace(/\s+/g, " ")
-    return text ? text.slice(0, 18) : "文本"
+    return text ? text.slice(0, 18) : elementLabel(el, t)
   }
   if (el.type === "shape") {
     const text = htmlToPlainText(el.text.content).trim()
-    return text ? `${el.name} · ${text.slice(0, 12)}` : el.name
+    const name = elementLabel(el, t)
+    return text ? `${name} · ${text.slice(0, 12)}` : name
   }
-  return el.name
+  return elementLabel(el, t)
 }
 
 /**
@@ -51,6 +55,7 @@ function labelOf(el: SlideElement): string {
  * that is otherwise unreachable once an element is locked.
  */
 export function LayerPanel() {
+  const t = useT()
   const slides = useEditor((s) => s.slides)
   const slideIndex = useEditor((s) => s.slideIndex)
   const activeIds = useEditor((s) => s.activeIds)
@@ -66,14 +71,14 @@ export function LayerPanel() {
         onClick={() => setOpen((v) => !v)}
         className="flex w-full items-center justify-between px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-accent/50"
       >
-        图层 ({slide.elements.length})
+        {t("layers.heading", { count: slide.elements.length })}
         {open ? <ChevronDown className="size-3.5" /> : <ChevronUp className="size-3.5" />}
       </button>
 
       {open && (
         <ul className="max-h-56 overflow-y-auto px-2 pb-2">
           {!layers.length && (
-            <li className="px-2 py-3 text-center text-xs text-muted-foreground">暂无元素</li>
+            <li className="px-2 py-3 text-center text-xs text-muted-foreground">{t("layers.empty")}</li>
           )}
           {layers.map((el, position) => {
             const Icon = ICONS[el.type]
@@ -95,13 +100,13 @@ export function LayerPanel() {
                   )}
                 >
                   <Icon className="size-3.5 shrink-0" />
-                  <span className="truncate">{labelOf(el)}</span>
+                  <span className="truncate">{labelOf(el, t)}</span>
                 </button>
                 <Button
                   variant="ghost"
                   size="icon"
                   className="size-6 shrink-0"
-                  title={el.lock ? "解锁" : "锁定"}
+                  title={el.lock ? t("panel.unlock") : t("panel.lock")}
                   onClick={() => useEditor.getState().toggleLock([el.id])}
                 >
                   {el.lock ? (
@@ -114,7 +119,7 @@ export function LayerPanel() {
                   <button
                     className="px-1 text-muted-foreground hover:text-foreground disabled:opacity-30"
                     disabled={position === 0}
-                    title="上移一层"
+                    title={t("layers.moveUp")}
                     onClick={() => useEditor.getState().setElementIndex(el.id, storeIndex + 1)}
                   >
                     <ChevronUp className="size-3" />
@@ -122,7 +127,7 @@ export function LayerPanel() {
                   <button
                     className="px-1 text-muted-foreground hover:text-foreground disabled:opacity-30"
                     disabled={position === layers.length - 1}
-                    title="下移一层"
+                    title={t("layers.moveDown")}
                     onClick={() => useEditor.getState().setElementIndex(el.id, storeIndex - 1)}
                   >
                     <ChevronDown className="size-3" />

@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server"
 import { currentUser } from "@/auth"
 import { readThumbnail, writeThumbnail } from "@/lib/decks"
+import { readBytes } from "@/lib/http"
+import { getLocale } from "@/lib/i18n/server"
+import { translator } from "@/lib/i18n/translate"
 
 type Context = { params: Promise<{ id: string }> }
 
@@ -31,22 +34,29 @@ export async function GET(_request: Request, { params }: Context) {
 /** The editor uploads a render of the first slide after each save. */
 export async function PUT(request: Request, { params }: Context) {
   const user = await currentUser()
-  if (!user) return NextResponse.json({ error: "未登录" }, { status: 401 })
+  const t = translator(await getLocale())
+  if (!user) return NextResponse.json({ error: t("api.unauthorized") }, { status: 401 })
 
-  const bytes = new Uint8Array(await request.arrayBuffer())
-  if (!bytes.byteLength) {
-    return NextResponse.json({ error: "缩略图为空" }, { status: 400 })
+  // the cap is enforced while reading rather than after: `arrayBuffer()` would have
+  // buffered the whole upload before anyone could object to its size
+  const body = await readBytes(request, MAX_THUMBNAIL_BYTES)
+  if (!body.ok) {
+    return body.reason === "too-large"
+      ? NextResponse.json({ error: t("api.thumbnailTooLarge") }, { status: 413 })
+      : NextResponse.json({ error: t("api.thumbnailEmpty") }, { status: 400 })
   }
-  if (bytes.byteLength > MAX_THUMBNAIL_BYTES) {
-    return NextResponse.json({ error: "缩略图过大" }, { status: 413 })
+
+  const bytes = body.value
+  if (!bytes.byteLength) {
+    return NextResponse.json({ error: t("api.thumbnailEmpty") }, { status: 400 })
   }
   if (!isPng(bytes)) {
-    return NextResponse.json({ error: "缩略图必须是 PNG" }, { status: 415 })
+    return NextResponse.json({ error: t("api.thumbnailNotPng") }, { status: 415 })
   }
 
   const { id } = await params
   if (!(await writeThumbnail(id, user.id, bytes))) {
-    return NextResponse.json({ error: "演示文稿不存在" }, { status: 404 })
+    return NextResponse.json({ error: t("api.deckNotFound") }, { status: 404 })
   }
 
   return new NextResponse(null, { status: 204 })

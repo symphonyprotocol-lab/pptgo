@@ -57,9 +57,10 @@ import {
 } from "@/lib/factory"
 import { downloadDeckJson, exportPptx } from "@/lib/export"
 import { exportImages, exportPdf } from "@/lib/export-media"
-import { importPptx } from "@/lib/import-pptx"
+import { formatBytes, importPptx } from "@/lib/import-pptx"
 import { SHAPE_LIST } from "@/lib/shapes"
 import { VIEWPORT_HEIGHT, VIEWPORT_WIDTH } from "@/lib/constants"
+import { useT } from "@/lib/i18n/client"
 import { useEditor } from "@/store/editor"
 import type { Deck } from "@/types/slides"
 import { FindReplace } from "./find-replace"
@@ -100,6 +101,16 @@ function IconButton({
   )
 }
 
+/**
+ * What a single inserted file may weigh. Everything embeds as a base64 data URI inside the
+ * deck document, so these are budgets against the 25MB a deck may be saved at — and the
+ * point of checking here is that the alternative was letting someone drop in a 200MB video,
+ * work for twenty minutes, and be told at the first autosave that none of it could be kept.
+ */
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024
+const MAX_MEDIA_BYTES = 20 * 1024 * 1024
+const MAX_DECK_FILE_BYTES = 40 * 1024 * 1024
+
 export function Toolbar({
   onPresent,
   backHref = "/",
@@ -107,6 +118,7 @@ export function Toolbar({
   onPresent: () => void
   backHref?: string
 }) {
+  const t = useT()
   const title = useEditor((s) => s.title)
   const activeIds = useEditor((s) => s.activeIds)
   const creating = useEditor((s) => s.creating)
@@ -133,7 +145,21 @@ export function Toolbar({
 
   const hasSelection = activeIds.length > 0
 
+  /** True when the file fits; otherwise it says so and the caller stops. */
+  const withinLimit = (file: File, limit: number) => {
+    if (file.size <= limit) return true
+    window.alert(
+      t("error.fileTooLarge", {
+        name: file.name,
+        size: formatBytes(file.size),
+        limit: formatBytes(limit),
+      }),
+    )
+    return false
+  }
+
   const onPickImage = (file: File) => {
+    if (!withinLimit(file, MAX_IMAGE_BYTES)) return
     const reader = new FileReader()
     reader.onload = () => {
       const src = String(reader.result)
@@ -148,30 +174,34 @@ export function Toolbar({
         }
         useEditor.getState().addElement(createImageElement(src, width, height))
       }
-      img.onerror = () => window.alert("这张图片无法读取")
+      img.onerror = () => window.alert(t("error.imageUnreadable"))
       img.src = src
     }
+    reader.onerror = () => window.alert(t("error.imageUnreadable"))
     reader.readAsDataURL(file)
   }
 
   const onPickMedia = (type: "video" | "audio", file: File) => {
+    if (!withinLimit(file, MAX_MEDIA_BYTES)) return
     const reader = new FileReader()
     reader.onload = () =>
       useEditor
         .getState()
         .addElement(createMediaElement(type, String(reader.result), { name: file.name }))
-    reader.onerror = () => window.alert("这个文件无法读取")
+    reader.onerror = () => window.alert(t("error.mediaUnreadable"))
     reader.readAsDataURL(file)
   }
 
   const onImportDeck = async (file: File) => {
+    if (!withinLimit(file, MAX_DECK_FILE_BYTES)) return
+
     if (file.name.toLowerCase().endsWith(".pptx")) {
-      setBusy("正在解析 PPTX…")
+      setBusy(t("editor.busyImporting"))
       try {
-        const deck = await importPptx(file)
-        useEditor.getState().loadDeck(normalizeDeck(deck))
+        const deck = await importPptx(file, t)
+        useEditor.getState().loadDeck(normalizeDeck(deck, t))
       } catch (error) {
-        window.alert(`无法解析该 PPTX：${(error as Error).message}`)
+        window.alert(t("error.pptxUnparsable", { message: (error as Error).message }))
       } finally {
         setBusy(null)
       }
@@ -181,10 +211,10 @@ export function Toolbar({
     const text = await file.text()
     try {
       const raw = JSON.parse(text) as Deck
-      if (!Array.isArray(raw.slides)) throw new Error("缺少 slides")
-      useEditor.getState().loadDeck(normalizeDeck(raw))
+      if (!Array.isArray(raw.slides)) throw new Error("no slides")
+      useEditor.getState().loadDeck(normalizeDeck(raw, t))
     } catch {
-      window.alert("无法解析该文件，请选择 .pptx 或由 PPTGo 导出的 .pptgo.json")
+      window.alert(t("error.deckUnparsable"))
     }
   }
 
@@ -193,7 +223,7 @@ export function Toolbar({
     try {
       await task()
     } catch (error) {
-      window.alert(`导出失败：${(error as Error).message}`)
+      window.alert(t("error.exportFailed", { message: (error as Error).message }))
     } finally {
       setBusy(null)
     }
@@ -205,13 +235,14 @@ export function Toolbar({
           reads at 18px is the whole reason it is only two shapes */}
       <Link
         href={backHref}
-        aria-label="返回"
+        aria-label={t("editor.back")}
         className="order-1 shrink-0 rounded-md px-1.5 py-1 text-[18px] hover:bg-muted"
       >
         <LogoMark />
       </Link>
       <Input
         value={title}
+        aria-label={t("editor.deckTitle")}
         onChange={(e) => useEditor.getState().setTitle(e.target.value)}
         className="order-2 hidden h-8 w-28 shrink-0 border-transparent bg-transparent px-2 text-sm shadow-none hover:border-input focus-visible:border-input sm:block lg:w-36"
       />
@@ -219,17 +250,17 @@ export function Toolbar({
       <div className="order-4 flex w-full min-w-0 flex-1 basis-full items-center gap-1 overflow-x-auto [scrollbar-width:none] lg:order-3 lg:w-auto lg:basis-auto [&::-webkit-scrollbar]:hidden">
         <Separator orientation="vertical" className="mx-1 h-6" />
 
-        <IconButton label="撤销 (⌘Z)" disabled={!canUndo} onClick={() => useEditor.getState().undo()}>
+        <IconButton label={t("editor.undo")} disabled={!canUndo} onClick={() => useEditor.getState().undo()}>
           <Undo2 className="size-4" />
         </IconButton>
-        <IconButton label="重做 (⌘⇧Z)" disabled={!canRedo} onClick={() => useEditor.getState().redo()}>
+        <IconButton label={t("editor.redo")} disabled={!canRedo} onClick={() => useEditor.getState().redo()}>
           <Redo2 className="size-4" />
         </IconButton>
 
         <Separator orientation="vertical" className="mx-1 h-6" />
 
         <IconButton
-          label="文本框"
+          label={t("editor.textBox")}
           active={creating?.kind === "text"}
           onClick={() => useEditor.getState().setCreating({ kind: "text" })}
         >
@@ -246,7 +277,7 @@ export function Toolbar({
               variant={creating?.kind === "shape" ? "secondary" : "ghost"}
               size="icon"
               className="size-8"
-              aria-label="形状"
+              aria-label={t("editor.shapes")}
             >
               <Shapes className="size-4" />
             </Button>
@@ -256,8 +287,8 @@ export function Toolbar({
               {SHAPE_LIST.map((shape) => (
                 <button
                   key={shape.key}
-                  title={shape.label}
-                  aria-label={shape.label}
+                  title={t(shape.labelKey)}
+                  aria-label={t(shape.labelKey)}
                   onClick={() => {
                     useEditor.getState().setCreating({ kind: "shape", shapeKey: shape.key })
                     setShapesOpen(false)
@@ -279,7 +310,7 @@ export function Toolbar({
               variant={creating?.kind === "line" ? "secondary" : "ghost"}
               size="icon"
               className="size-8"
-              aria-label="线条"
+              aria-label={t("editor.lines")}
             >
               <Minus className="size-4" />
             </Button>
@@ -288,15 +319,20 @@ export function Toolbar({
             <div className="flex flex-col gap-1">
               {(
                 [
-                  { label: "直线", style: "solid", endCap: "none", icon: <Minus className="size-4" /> },
                   {
-                    label: "虚线",
+                    labelKey: "editor.lineSolid",
+                    style: "solid",
+                    endCap: "none",
+                    icon: <Minus className="size-4" />,
+                  },
+                  {
+                    labelKey: "editor.lineDashed",
                     style: "dashed",
                     endCap: "none",
                     icon: <Minus className="size-4 opacity-50" />,
                   },
                   {
-                    label: "箭头",
+                    labelKey: "editor.lineArrow",
                     style: "solid",
                     endCap: "arrow",
                     icon: <ArrowRight className="size-4" />,
@@ -304,7 +340,7 @@ export function Toolbar({
                 ] as const
               ).map((item) => (
                 <Button
-                  key={item.label}
+                  key={item.labelKey}
                   variant="ghost"
                   className="justify-start gap-2"
                   onClick={() => {
@@ -315,14 +351,14 @@ export function Toolbar({
                   }}
                 >
                   {item.icon}
-                  {item.label}
+                  {t(item.labelKey)}
                 </Button>
               ))}
             </div>
           </PopoverContent>
         </Popover>
 
-        <IconButton label="插入图片" onClick={() => imageInput.current?.click()}>
+        <IconButton label={t("editor.insertImage")} onClick={() => imageInput.current?.click()}>
           <ImageIcon className="size-4" />
         </IconButton>
         <input
@@ -338,18 +374,18 @@ export function Toolbar({
         />
 
         <IconButton
-          label="插入表格"
-          onClick={() => useEditor.getState().addElement(createTableElement())}
+          label={t("editor.insertTable")}
+          onClick={() => useEditor.getState().addElement(createTableElement(3, 3, {}, t))}
         >
           <TableIcon className="size-4" />
         </IconButton>
         <IconButton
-          label="插入图表"
-          onClick={() => useEditor.getState().addElement(createChartElement())}
+          label={t("editor.insertChart")}
+          onClick={() => useEditor.getState().addElement(createChartElement({}, t))}
         >
           <BarChart3 className="size-4" />
         </IconButton>
-        <IconButton label="插入视频" onClick={() => videoInput.current?.click()}>
+        <IconButton label={t("editor.insertVideo")} onClick={() => videoInput.current?.click()}>
           <Video className="size-4" />
         </IconButton>
         <input
@@ -363,7 +399,7 @@ export function Toolbar({
             e.target.value = ""
           }}
         />
-        <IconButton label="插入音频" onClick={() => audioInput.current?.click()}>
+        <IconButton label={t("editor.insertAudio")} onClick={() => audioInput.current?.click()}>
           <Music className="size-4" />
         </IconButton>
         <input
@@ -378,13 +414,13 @@ export function Toolbar({
           }}
         />
         <IconButton
-          label="插入公式"
+          label={t("editor.insertFormula")}
           onClick={() => useEditor.getState().addElement(createFormulaElement())}
         >
           <Sigma className="size-4" />
         </IconButton>
         <IconButton
-          label="自由绘制"
+          label={t("editor.freehand")}
           active={creating?.kind === "pencil"}
           onClick={() => useEditor.getState().setCreating({ kind: "pencil" })}
         >
@@ -394,28 +430,28 @@ export function Toolbar({
         <Separator orientation="vertical" className="mx-1 h-6" />
 
         <IconButton
-          label="左对齐"
+          label={t("editor.alignLeft")}
           disabled={!hasSelection}
           onClick={() => useEditor.getState().alignElements("left")}
         >
           <AlignStartHorizontal className="size-4 rotate-90" />
         </IconButton>
         <IconButton
-          label="水平居中"
+          label={t("editor.alignCenter")}
           disabled={!hasSelection}
           onClick={() => useEditor.getState().alignElements("center")}
         >
           <AlignHorizontalJustifyCenter className="size-4" />
         </IconButton>
         <IconButton
-          label="右对齐"
+          label={t("editor.alignRight")}
           disabled={!hasSelection}
           onClick={() => useEditor.getState().alignElements("right")}
         >
           <AlignEndHorizontal className="size-4 rotate-90" />
         </IconButton>
         <IconButton
-          label="垂直居中"
+          label={t("editor.alignMiddle")}
           disabled={!hasSelection}
           onClick={() => useEditor.getState().alignElements("middle")}
         >
@@ -425,35 +461,35 @@ export function Toolbar({
         <Separator orientation="vertical" className="mx-1 h-6" />
 
         <IconButton
-          label="置于顶层"
+          label={t("editor.bringToFront")}
           disabled={!hasSelection}
           onClick={() => useEditor.getState().reorder(activeIds, "front")}
         >
           <BringToFront className="size-4" />
         </IconButton>
         <IconButton
-          label="置于底层"
+          label={t("editor.sendToBack")}
           disabled={!hasSelection}
           onClick={() => useEditor.getState().reorder(activeIds, "back")}
         >
           <SendToBack className="size-4" />
         </IconButton>
         <IconButton
-          label="组合 (⌘G)"
+          label={t("editor.group")}
           disabled={activeIds.length < 2}
           onClick={() => useEditor.getState().groupElements()}
         >
           <Group className="size-4" />
         </IconButton>
         <IconButton
-          label="取消组合 (⌘⇧G)"
+          label={t("editor.ungroup")}
           disabled={!hasSelection}
           onClick={() => useEditor.getState().ungroupElements()}
         >
           <Ungroup className="size-4" />
         </IconButton>
         <IconButton
-          label="创建副本 (⌘D)"
+          label={t("editor.duplicate")}
           disabled={!hasSelection}
           onClick={() => {
             const store = useEditor.getState()
@@ -464,20 +500,20 @@ export function Toolbar({
           <Copy className="size-4" />
         </IconButton>
         <IconButton
-          label="删除 (Del)"
+          label={t("editor.delete")}
           disabled={!hasSelection}
           onClick={() => useEditor.getState().deleteElements(activeIds)}
         >
           <Trash2 className="size-4" />
         </IconButton>
-        <IconButton label="网格" active={showGrid} onClick={() => useEditor.getState().toggleGrid()}>
+        <IconButton label={t("editor.grid")} active={showGrid} onClick={() => useEditor.getState().toggleGrid()}>
           <Grid3x3 className="size-4" />
         </IconButton>
-        <IconButton label="标尺" active={showRuler} onClick={() => useEditor.getState().toggleRuler()}>
+        <IconButton label={t("editor.ruler")} active={showRuler} onClick={() => useEditor.getState().toggleRuler()}>
           <RulerIcon className="size-4" />
         </IconButton>
         <IconButton
-          label={painter ? "点击目标元素应用格式（按住 Alt 可连续应用）" : "格式刷"}
+          label={painter ? t("editor.formatPainterArmed") : t("editor.formatPainter")}
           active={!!painter}
           disabled={!painter && activeIds.length !== 1}
           onClick={() => {
@@ -488,7 +524,7 @@ export function Toolbar({
         >
           <Paintbrush className="size-4" />
         </IconButton>
-        <IconButton label="查找替换 (⌘F)" onClick={() => setFinding(true)}>
+        <IconButton label={t("editor.findReplace")} onClick={() => setFinding(true)}>
           <Search className="size-4" />
         </IconButton>
       </div>
@@ -502,7 +538,7 @@ export function Toolbar({
         className="shrink-0"
         onClick={() => deckInput.current?.click()}
       >
-        <Upload className="size-4" /> 导入
+        <Upload className="size-4" /> {t("editor.import")}
       </Button>
       <input
         ref={deckInput}
@@ -519,38 +555,44 @@ export function Toolbar({
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" size="sm" className="shrink-0" disabled={!!busy}>
-            <Download className="size-4" /> 导出
+            <Download className="size-4" /> {t("editor.export")}
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           <DropdownMenuItem
             onClick={() =>
-              runExport("正在生成 PPTX…", () => exportPptx(useEditor.getState().exportDeck()))
+              runExport(t("editor.busyPptx"), () =>
+                exportPptx(useEditor.getState().exportDeck(), t),
+              )
             }
           >
-            导出 PPTX
+            {t("editor.exportPptx")}
           </DropdownMenuItem>
           <DropdownMenuItem
             onClick={() =>
-              runExport("正在生成图片…", () => exportImages(useEditor.getState().exportDeck()))
+              runExport(t("editor.busyImages"), () =>
+                exportImages(useEditor.getState().exportDeck(), t),
+              )
             }
           >
-            导出图片 (PNG)
+            {t("editor.exportPng")}
           </DropdownMenuItem>
           <DropdownMenuItem
-            onClick={() => runExport("正在准备打印…", () => exportPdf(useEditor.getState().exportDeck()))}
+            onClick={() =>
+              runExport(t("editor.busyPdf"), () => exportPdf(useEditor.getState().exportDeck()))
+            }
           >
-            导出 PDF（打印）
+            {t("editor.exportPdf")}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={() => downloadDeckJson(useEditor.getState().exportDeck())}>
-            导出 JSON
+            {t("editor.exportJson")}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
 
       <Button size="sm" className="shrink-0" onClick={onPresent}>
-        <Play className="size-4" /> 放映
+        <Play className="size-4" /> {t("editor.present")}
       </Button>
       </div>
 

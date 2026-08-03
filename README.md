@@ -13,9 +13,13 @@ The whole thing self-hosts with one command — Next.js, PostgreSQL and an S3-co
 object store, no third-party service in the loop:
 
 ```bash
-cp .env.example .env   # fill in AUTH_SECRET and the Google OAuth client
+./scripts/gen-secrets.sh   # writes .env and generates the three secrets in it
 docker compose up -d --build
 ```
+
+`gen-secrets.sh` only fills blanks, so it is safe to re-run. Sign-in additionally needs a
+Google OAuth client — without one the stack still comes up, with the landing page and the
+browser-local editor.
 
 Or run just the editor, with no database and no sign-in:
 
@@ -126,8 +130,12 @@ bookkeeping against `pg` alone — same `drizzle.__drizzle_migrations` table, so
 `drizzle-kit migrate` stays interchangeable with it.
 
 Sign-in needs a Google OAuth client whose authorised redirect URI is
-`<AUTH_URL>/api/auth/callback/google`. Everything else has a working default in
-[`.env.example`](.env.example). The image build needs network access beyond the base
+`<AUTH_URL>/api/auth/callback/google`. The session key, the database password and the
+object-store secret have no defaults and compose refuses to start without them —
+[`scripts/gen-secrets.sh`](scripts/gen-secrets.sh) generates all three. Postgres and rustfs
+publish to `127.0.0.1` only; they are exposed at all just so a `npm run dev` outside Docker
+can reach them, and `POSTGRES_BIND` / `RUSTFS_BIND` widen that if you mean to. The image
+build needs network access beyond the base
 image: `next/font` downloads Geist, Geist Mono and Fraunces at build time and inlines them,
 so the running container needs no font CDN, but the builder does.
 

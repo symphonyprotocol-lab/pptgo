@@ -72,8 +72,8 @@ export async function currentUser(): Promise<SessionUser | null> {
   } catch (error) {
     if (process.env.NODE_ENV === "production") throw error
     console.warn(
-      `[auth] 会话读取失败，按未登录继续：${(error as Error).message}\n` +
-        `        需要登录功能的话，复制 web/.env.example 到 web/.env.local 并填好 AUTH_SECRET。`,
+      `[auth] could not read the session, continuing as signed out: ${(error as Error).message}\n` +
+        `        For sign-in, copy web/.env.example to web/.env.local and set AUTH_SECRET.`,
     )
     return null
   }

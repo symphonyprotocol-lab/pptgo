@@ -1,9 +1,9 @@
 "use client"
 
 import { create } from "zustand"
-import { createDeck, createSlide, newId } from "@/lib/factory"
+import { createSlide, newId } from "@/lib/factory"
 import { distribute, rotateWithin, scaleWithin, unionBounds, type Box } from "@/lib/geometry"
-import { VIEWPORT_HEIGHT, VIEWPORT_WIDTH } from "@/lib/constants"
+import { DEFAULT_THEME, VIEWPORT_HEIGHT, VIEWPORT_WIDTH } from "@/lib/constants"
 import type {
   Deck,
   DeckTheme,
@@ -12,6 +12,7 @@ import type {
   Slide,
   SlideBackground,
   SlideElement,
+  TableCell,
   TableElement,
   TransitionType,
 } from "@/types/slides"
@@ -40,6 +41,17 @@ export type AlignAction =
   | "vcenter"
 
 interface EditorState {
+  /**
+   * Whether `loadDeck` has run, i.e. whether these slides came from storage rather than
+   * being the placeholder below.
+   *
+   * Autosave keys off this. Without it, anything that replaced the store's state with a
+   * fresh initial one — a Fast Refresh re-evaluating this module is the way it actually
+   * happens — left a mounted editor believing it was still holding the user's deck, and
+   * the next autosave wrote one blank slide over it. A flag that resets with the module
+   * turns that into doing nothing.
+   */
+  hydrated: boolean
   title: string
   theme: DeckTheme
   slides: Slide[]
@@ -137,7 +149,18 @@ interface EditorState {
 const clone = <T,>(value: T): T =>
   typeof structuredClone === "function" ? structuredClone(value) : JSON.parse(JSON.stringify(value))
 
-const initial = createDeck()
+/**
+ * One blank slide, not the starter deck. The store is module scope, where there is no
+ * request and therefore no language — building the sample deck here meant its wording was
+ * fixed at import time, and every reader saw a frame of it before `EditorShell` replaced
+ * it with the same deck in their own language. The shell now builds it, and this is just
+ * something valid for `currentSlide()` to return in the meantime.
+ */
+const initial: Pick<Deck, "title" | "theme" | "slides"> = {
+  title: "",
+  theme: DEFAULT_THEME,
+  slides: [createSlide()],
+}
 
 /** Applies `fn` to the slide currently being edited, leaving the others untouched. */
 const mapCurrent = (slides: Slide[], index: number, fn: (slide: Slide) => Slide) =>
@@ -243,6 +266,70 @@ export function mergeStyle(target: SlideElement, style: Partial<SlideElement>): 
   return { ...style, text: { ...incoming, content: target.text.content } } as Partial<SlideElement>
 }
 
+/**
+ * Column widths after inserting one, and after removing one.
+ *
+ * Both used to reset every column to an equal share, so adding a column to a table whose
+ * widths had been tuned threw that work away. The new column takes an average share and
+ * the rest are rescaled to keep their proportions; a removed column's share is given back
+ * to the others in the same way.
+ */
+function insertColumnWidth(widths: number[], at: number, count: number): number[] {
+  if (widths.length !== count) return Array.from({ length: count + 1 }, () => 1 / (count + 1))
+  const share = 1 / (count + 1)
+  const next = widths.map((w) => w * (1 - share))
+  next.splice(at, 0, share)
+  return next
+}
+
+function removeColumnWidth(widths: number[], at: number, count: number): number[] {
+  if (widths.length !== count) return Array.from({ length: count - 1 }, () => 1 / (count - 1))
+  const rest = widths.filter((_, i) => i !== at)
+  const total = rest.reduce((sum, w) => sum + w, 0)
+  return total > 0 ? rest.map((w) => w / total) : rest.map(() => 1 / rest.length)
+}
+
+/**
+ * Clamps every span to the grid that is actually left, and frees cells whose anchor is
+ * gone.
+ *
+ * Deleting the row or column an anchor sat in used to leave its `merged` neighbours
+ * pointing at nothing: the renderer skipped them because they claimed to be covered, and
+ * nothing covered them any more, so the table came back a cell short per row.
+ */
+function repairSpans(rows: TableCell[][]): TableCell[][] {
+  const height = rows.length
+  const width = rows[0]?.length ?? 0
+  const covered = rows.map((row) => row.map(() => false))
+
+  const repaired = rows.map((row, r) =>
+    row.map((cell, c) => {
+      const colspan = Math.max(1, Math.min(cell.colspan ?? 1, width - c))
+      const rowspan = Math.max(1, Math.min(cell.rowspan ?? 1, height - r))
+      return { ...cell, colspan, rowspan }
+    }),
+  )
+
+  // mark what each surviving anchor covers
+  for (let r = 0; r < height; r += 1) {
+    for (let c = 0; c < width; c += 1) {
+      const cell = repaired[r][c]
+      if (cell.merged) continue
+      for (let dr = 0; dr < cell.rowspan; dr += 1) {
+        for (let dc = 0; dc < cell.colspan; dc += 1) {
+          if (dr || dc) covered[r + dr][c + dc] = true
+        }
+      }
+    }
+  }
+
+  return repaired.map((row, r) =>
+    row.map((cell, c) =>
+      cell.merged && !covered[r][c] ? { ...cell, merged: false, colspan: 1, rowspan: 1 } : cell,
+    ),
+  )
+}
+
 /** Orders an anchor/focus pair into top-left / bottom-right. */
 function normalizedRange(
   selection: [[number, number], [number, number]] | null,
@@ -256,6 +343,7 @@ function normalizedRange(
 }
 
 export const useEditor = create<EditorState>((set, get) => ({
+  hydrated: false,
   title: initial.title,
   theme: initial.theme,
   slides: initial.slides,
@@ -287,6 +375,7 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   loadDeck: (deck) =>
     set({
+      hydrated: true,
       title: deck.title,
       theme: deck.theme,
       slides: deck.slides,
@@ -492,8 +581,10 @@ export const useEditor = create<EditorState>((set, get) => ({
       next.splice(clamped, 0, { text: "", colspan: 1, rowspan: 1 })
       return next
     })
-    const colWidths = Array.from({ length: count + 1 }, () => 1 / (count + 1))
-    get().updateElement(table.id, { rows, colWidths } as Partial<SlideElement>)
+    get().updateElement(table.id, {
+      rows,
+      colWidths: insertColumnWidth(table.colWidths, clamped, count),
+    } as Partial<SlideElement>)
   },
 
   removeTableRow: () => {
@@ -502,7 +593,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     if (!table || table.rows.length <= 1) return
     const index = range?.[0][0] ?? table.rows.length - 1
     get().commit()
-    const rows = table.rows.filter((_, r) => r !== index)
+    const rows = repairSpans(table.rows.filter((_, r) => r !== index))
     get().updateElement(table.id, { rows } as Partial<SlideElement>)
     set({ tableSelection: null })
   },
@@ -514,9 +605,11 @@ export const useEditor = create<EditorState>((set, get) => ({
     if (!table || count <= 1) return
     const index = range?.[0][1] ?? count - 1
     get().commit()
-    const rows = table.rows.map((row) => row.filter((_, c) => c !== index))
-    const colWidths = Array.from({ length: count - 1 }, () => 1 / (count - 1))
-    get().updateElement(table.id, { rows, colWidths } as Partial<SlideElement>)
+    const rows = repairSpans(table.rows.map((row) => row.filter((_, c) => c !== index)))
+    get().updateElement(table.id, {
+      rows,
+      colWidths: removeColumnWidth(table.colWidths, index, count),
+    } as Partial<SlideElement>)
     set({ tableSelection: null })
   },
 

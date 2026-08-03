@@ -293,16 +293,34 @@ export function ElementBox({
   children,
   contentOverride,
   playable,
+  onFollowLink,
   ...rest
 }: {
   element: SlideElement
   children?: React.ReactNode
   contentOverride?: React.ReactNode
   playable?: boolean
+  /**
+   * Called when a linked element is clicked, in the views where links are live. Element
+   * hyperlinks were settable in the property panel and honoured on export, but inert in
+   * the app — a link you could add, save and hand to an audience, and which then did
+   * nothing when anyone clicked it during the presentation.
+   */
+  onFollowLink?: (link: NonNullable<SlideElement["link"]>) => void
 } & React.HTMLAttributes<HTMLDivElement>) {
+  const linked = onFollowLink && element.link
   return (
     <div
       {...rest}
+      onClick={
+        linked
+          ? (event) => {
+              event.stopPropagation()
+              onFollowLink(element.link!)
+              rest.onClick?.(event)
+            }
+          : rest.onClick
+      }
       style={{
         position: "absolute",
         left: element.left,
@@ -311,6 +329,7 @@ export function ElementBox({
         height: element.height,
         transform: element.rotate ? `rotate(${element.rotate}deg)` : undefined,
         opacity: element.opacity ?? 1,
+        cursor: linked ? "pointer" : undefined,
         ...rest.style,
       }}
     >

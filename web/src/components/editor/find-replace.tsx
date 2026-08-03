@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { htmlToPlainText, replaceInHtmlText } from "@/lib/sanitize"
 import { useEditor } from "@/store/editor"
+import { useT } from "@/lib/i18n/client"
 import type { Slide, SlideElement } from "@/types/slides"
 
 interface Hit {
@@ -22,15 +23,30 @@ const textOf = (el: SlideElement): string => {
   return ""
 }
 
-function findHits(slides: Slide[], query: string): Hit[] {
-  if (!query) return []
+/**
+ * One entry per element that contains the term, plus how many times it occurs in total.
+ *
+ * The two numbers are different and the readout wants the second one. It used to show
+ * `hits.length` labelled as matches, so a slide whose title said "draft" three times
+ * reported one — and "Replace all" then changed three, which looked like it had
+ * overreached.
+ */
+function findHits(slides: Slide[], query: string): { hits: Hit[]; matches: number } {
+  if (!query) return { hits: [], matches: 0 }
   const needle = query.toLowerCase()
   const hits: Hit[] = []
+  let matches = 0
+
   slides.forEach((slide, slideIndex) => {
     for (const el of slide.elements) {
       const text = textOf(el)
-      const at = text.toLowerCase().indexOf(needle)
+      const haystack = text.toLowerCase()
+      const at = haystack.indexOf(needle)
       if (at < 0) continue
+
+      for (let from = at; from >= 0; from = haystack.indexOf(needle, from + needle.length)) {
+        matches += 1
+      }
       hits.push({
         slideIndex,
         elementId: el.id,
@@ -38,16 +54,17 @@ function findHits(slides: Slide[], query: string): Hit[] {
       })
     }
   })
-  return hits
+  return { hits, matches }
 }
 
 /** Plain-text find and replace across every slide. */
 export function FindReplace({ onClose }: { onClose: () => void }) {
+  const t = useT()
   const slides = useEditor((s) => s.slides)
   const [query, setQuery] = useState("")
   const [replacement, setReplacement] = useState("")
 
-  const hits = useMemo(() => findHits(slides, query), [slides, query])
+  const { hits, matches: matchCount } = useMemo(() => findHits(slides, query), [slides, query])
 
   const goTo = (hit: Hit) => {
     const store = useEditor.getState()
@@ -98,15 +115,15 @@ export function FindReplace({ onClose }: { onClose: () => void }) {
   return (
     <div className="absolute right-3 top-14 z-50 w-80 rounded-lg border bg-popover p-3 shadow-lg">
       <div className="flex items-center justify-between">
-        <span className="text-sm font-medium">查找和替换</span>
-        <Button variant="ghost" size="icon" className="size-6" aria-label="关闭" onClick={onClose}>
+        <span className="text-sm font-medium">{t("find.title")}</span>
+        <Button variant="ghost" size="icon" className="size-6" aria-label={t("find.close")} onClick={onClose}>
           <X className="size-4" />
         </Button>
       </div>
 
       <div className="mt-3 space-y-2">
         <div className="space-y-1">
-          <Label className="text-xs font-normal text-muted-foreground">查找</Label>
+          <Label className="text-xs font-normal text-muted-foreground">{t("find.query")}</Label>
           <Input
             autoFocus
             value={query}
@@ -115,7 +132,7 @@ export function FindReplace({ onClose }: { onClose: () => void }) {
           />
         </div>
         <div className="space-y-1">
-          <Label className="text-xs font-normal text-muted-foreground">替换为</Label>
+          <Label className="text-xs font-normal text-muted-foreground">{t("find.replacement")}</Label>
           <Input
             value={replacement}
             onChange={(e) => setReplacement(e.target.value)}
@@ -126,10 +143,10 @@ export function FindReplace({ onClose }: { onClose: () => void }) {
 
       <div className="mt-2 flex items-center justify-between">
         <span className="text-xs text-muted-foreground">
-          {query ? `${hits.length} 处匹配` : "输入要查找的内容"}
+          {query ? t("find.matches", { count: matchCount }) : t("find.prompt")}
         </span>
         <Button size="sm" disabled={!hits.length} onClick={replaceAll}>
-          全部替换
+          {t("find.replaceAll")}
         </Button>
       </div>
 
@@ -141,7 +158,9 @@ export function FindReplace({ onClose }: { onClose: () => void }) {
                 onClick={() => goTo(hit)}
                 className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-xs hover:bg-accent"
               >
-                <span className="shrink-0 text-muted-foreground">第 {hit.slideIndex + 1} 页</span>
+                <span className="shrink-0 text-muted-foreground">
+                  {t("find.onSlide", { index: hit.slideIndex + 1 })}
+                </span>
                 <span className="truncate">{hit.preview}</span>
               </button>
             </li>

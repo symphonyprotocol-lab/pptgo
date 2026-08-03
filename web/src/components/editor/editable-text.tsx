@@ -17,6 +17,8 @@ import {
 } from "lucide-react"
 import { PRESET_COLORS } from "@/lib/constants"
 import { sanitizeHtml } from "@/lib/sanitize"
+import { useT } from "@/lib/i18n/client"
+import type { MessageKey } from "@/lib/i18n/messages"
 
 interface Props {
   html: string
@@ -132,15 +134,32 @@ function InlineToolbar({
   onCommand: (command: string, value?: string) => void
   onEnter: () => void
 }) {
-  const buttons: { icon: React.ReactNode; title: string; command: string; value?: string }[] = [
-    { icon: <Bold className="size-3.5" />, title: "加粗", command: "bold" },
-    { icon: <Italic className="size-3.5" />, title: "斜体", command: "italic" },
-    { icon: <Underline className="size-3.5" />, title: "下划线", command: "underline" },
-    { icon: <Strikethrough className="size-3.5" />, title: "删除线", command: "strikeThrough" },
-    { icon: <Subscript className="size-3.5" />, title: "下标", command: "subscript" },
-    { icon: <Superscript className="size-3.5" />, title: "上标", command: "superscript" },
-    { icon: <List className="size-3.5" />, title: "项目符号", command: "insertUnorderedList" },
-    { icon: <ListOrdered className="size-3.5" />, title: "编号", command: "insertOrderedList" },
+  const t = useT()
+  const buttons: { icon: React.ReactNode; title: MessageKey; command: string }[] = [
+    { icon: <Bold className="size-3.5" />, title: "editor.bold", command: "bold" },
+    { icon: <Italic className="size-3.5" />, title: "editor.italic", command: "italic" },
+    { icon: <Underline className="size-3.5" />, title: "editor.underline", command: "underline" },
+    {
+      icon: <Strikethrough className="size-3.5" />,
+      title: "editor.strikethrough",
+      command: "strikeThrough",
+    },
+    { icon: <Subscript className="size-3.5" />, title: "editor.subscript", command: "subscript" },
+    {
+      icon: <Superscript className="size-3.5" />,
+      title: "editor.superscript",
+      command: "superscript",
+    },
+    {
+      icon: <List className="size-3.5" />,
+      title: "editor.bulletList",
+      command: "insertUnorderedList",
+    },
+    {
+      icon: <ListOrdered className="size-3.5" />,
+      title: "editor.numberedList",
+      command: "insertOrderedList",
+    },
   ]
 
   return (
@@ -163,8 +182,8 @@ function InlineToolbar({
       {buttons.map((button) => (
         <button
           key={button.command}
-          title={button.title}
-          onClick={() => onCommand(button.command, button.value)}
+          title={t(button.title)}
+          onClick={() => onCommand(button.command)}
           className="flex size-6 items-center justify-center rounded hover:bg-accent"
         >
           {button.icon}
@@ -173,19 +192,19 @@ function InlineToolbar({
 
       <ColorButton
         icon={<Palette className="size-3.5" />}
-        title="文字颜色"
+        title={t("editor.textColor")}
         onPick={(color) => onCommand("foreColor", color)}
       />
       <ColorButton
         icon={<Highlighter className="size-3.5" />}
-        title="高亮"
+        title={t("editor.highlight")}
         onPick={(color) => onCommand("hiliteColor", color)}
       />
 
       <button
-        title="链接"
+        title={t("editor.link")}
         onClick={() => {
-          const url = window.prompt("输入链接地址")
+          const url = window.prompt(t("editor.linkPrompt"))
           if (url) onCommand("createLink", url)
           else onCommand("unlink")
         }}
@@ -194,7 +213,7 @@ function InlineToolbar({
         <Link2 className="size-3.5" />
       </button>
       <button
-        title="清除格式"
+        title={t("editor.clearFormat")}
         onClick={() => onCommand("removeFormat")}
         className="flex size-6 items-center justify-center rounded hover:bg-accent"
       >

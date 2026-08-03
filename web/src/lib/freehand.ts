@@ -30,7 +30,6 @@ export function freehandElement(points: [number, number][]): ShapeElement | null
   return createShapeElement(FREEHAND_KEY, {
     // the key is not in SHAPE_MAP, so it has to be set explicitly rather than derived
     shapeKey: FREEHAND_KEY,
-    name: "手绘",
     left,
     top,
     width: Math.max(1, width),

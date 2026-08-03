@@ -6,6 +6,9 @@ import { formulaToPng } from "./formula"
 import { bakeImage } from "./image"
 import { svgToPng } from "./raster"
 import { htmlToRuns, primaryFont, type RunDefaults } from "./rich-text"
+import { elementLabel } from "./element-label"
+import { cellBackground, cellTextColor, isHeaderRow } from "./table-theme"
+import { fallbackTranslate, type Translate } from "./i18n/translate"
 import { SHAPE_MAP } from "./shapes"
 import type {
   ChartElement,
@@ -42,6 +45,14 @@ export function triggerDownload(blob: Blob, filename: string) {
   // give the browser a tick to start the download before the blob disappears
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
+
+/** Escapes a value going into a double-quoted XML attribute. */
+export const xmlAttr = (value: string) =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
 
 const dashType = (style: string) =>
   style === "dashed" ? "dash" : style === "dotted" ? "sysDot" : "solid"
@@ -113,8 +124,8 @@ function textDefaults(el: TextElement): RunDefaults {
   }
 }
 
-export async function exportPptx(deck: Deck) {
-  const bytes = await writePptx(deck)
+export async function exportPptx(deck: Deck, t: Translate = fallbackTranslate) {
+  const bytes = await writePptx(deck, t)
   triggerDownload(
     new Blob([bytes], {
       type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
@@ -132,8 +143,8 @@ export async function exportPptx(deck: Deck) {
  * the first export. The tags are already in the generated XML, so this only rewrites the
  * `a:ea` value; nothing about the document's structure changes.
  */
-export async function writePptx(deck: Deck): Promise<ArrayBuffer> {
-  const pptx = await buildPptx(deck)
+export async function writePptx(deck: Deck, t: Translate = fallbackTranslate): Promise<ArrayBuffer> {
+  const pptx = await buildPptx(deck, t)
   const raw = (await pptx.write({ outputType: "arraybuffer" })) as ArrayBuffer
 
   const eastAsian = eastAsianByLatin(deck)
@@ -153,7 +164,8 @@ export async function writePptx(deck: Deck): Promise<ArrayBuffer> {
       /(<a:latin typeface="([^"]*)"[^>]*\/>\s*<a:ea typeface=")([^"]*)(")/g,
       (whole, head: string, latin: string, _current: string, tail: string) => {
         const ea = eastAsian.get(latin)
-        return ea ? `${head}${ea}${tail}` : whole
+        // the name is a deck value being written into XML, so it is escaped like any other
+        return ea ? `${head}${xmlAttr(ea)}${tail}` : whole
       },
     )
     if (patched !== xml) zip.file(name, patched)
@@ -210,7 +222,7 @@ function eastAsianByLatin(deck: Deck): Map<string, string> {
 }
 
 /** Split out from `exportPptx` so the whole mapping can be exercised without a download. */
-export async function buildPptx(deck: Deck): Promise<Pptx> {
+export async function buildPptx(deck: Deck, t: Translate = fallbackTranslate): Promise<Pptx> {
   const { default: PptxGenJSCtor } = await import("pptxgenjs")
 
   const pptx = new PptxGenJSCtor()
@@ -230,10 +242,10 @@ export async function buildPptx(deck: Deck): Promise<Pptx> {
           addText(slide, el, slideNumbers)
           break
         case "shape":
-          await addShape(slide, el, slideNumbers)
+          await addShape(slide, el, slideNumbers, t)
           break
         case "image":
-          await addImage(slide, el, slideNumbers)
+          await addImage(slide, el, slideNumbers, t)
           break
         case "line":
           addLine(slide, el)
@@ -242,7 +254,7 @@ export async function buildPptx(deck: Deck): Promise<Pptx> {
           addTable(slide, el)
           break
         case "chart":
-          addChart(slide, el)
+          addChart(slide, el, t)
           break
         case "video":
         case "audio":
@@ -283,6 +295,9 @@ function addText(slide: PptxSlide, el: TextElement, slideNumbers: Map<string, nu
     ...frameOf(el),
     align: el.align === "justify" ? "justify" : el.align,
     valign: el.vertical,
+    // element opacity used to reach the fill only, so a half-faded text box exported with
+    // solid black type sitting on a translucent panel
+    transparency: transparency(el.opacity),
     // PowerPoint counts multiples of *its* single spacing, not of the type size, so the
     // CSS multiplier has to be divided back down by the same factor import multiplied by
     lineSpacingMultiple: Math.min(9.99, Math.max(0.1, el.lineHeight / singleLineFactor(el.fontFamily))),
@@ -302,18 +317,21 @@ function addText(slide: PptxSlide, el: TextElement, slideNumbers: Map<string, nu
 }
 
 /** Renders a bespoke path to PNG — OOXML custom geometry is beyond what pptxgenjs emits. */
-async function addCustomShape(slide: PptxSlide, el: ShapeElement) {
+async function addCustomShape(slide: PptxSlide, el: ShapeElement, t: Translate) {
   const stroke = el.outline?.width ? el.outline : { width: 2, color: "#111827", style: "solid" }
+  // every interpolated value below came out of a deck, so it is escaped rather than
+  // trusted to be a colour: one `&` in a fill produced an SVG that would not parse, and
+  // the shape silently exported as a blank rectangle
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" width="${el.width}" height="${el.height}" ` +
     `viewBox="0 0 ${el.viewBox} ${el.viewBox}" preserveAspectRatio="none">` +
-    `<path d="${el.path.replace(/"/g, "'")}" fill="${el.fill === "transparent" ? "none" : el.fill}" ` +
-    `stroke="${stroke.color}" stroke-width="${stroke.width}" stroke-linecap="round" ` +
+    `<path d="${xmlAttr(el.path)}" fill="${xmlAttr(el.fill === "transparent" ? "none" : el.fill)}" ` +
+    `stroke="${xmlAttr(stroke.color)}" stroke-width="${stroke.width}" stroke-linecap="round" ` +
     `stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>`
 
   const png = await svgToPng(svg, el.width, el.height)
   if (png) {
-    slide.addImage({ ...frameOf(el), data: png, altText: el.name })
+    slide.addImage({ ...frameOf(el), data: png, altText: elementLabel(el, t) })
     return
   }
   // No rasteriser available. `{ type: "none" }` makes pptxgenjs omit the fill node entirely,
@@ -326,10 +344,15 @@ async function addCustomShape(slide: PptxSlide, el: ShapeElement) {
   })
 }
 
-async function addShape(slide: PptxSlide, el: ShapeElement, slideNumbers: Map<string, number>) {
+async function addShape(
+  slide: PptxSlide,
+  el: ShapeElement,
+  slideNumbers: Map<string, number>,
+  t: Translate,
+) {
   const def = SHAPE_MAP.get(el.shapeKey)
   if (!def) {
-    await addCustomShape(slide, el)
+    await addCustomShape(slide, el, t)
     return
   }
   const preset = def.preset as PptxGenJS.SHAPE_NAME
@@ -374,7 +397,12 @@ async function addShape(slide: PptxSlide, el: ShapeElement, slideNumbers: Map<st
   })
 }
 
-async function addImage(slide: PptxSlide, el: ImageElement, slideNumbers: Map<string, number>) {
+async function addImage(
+  slide: PptxSlide,
+  el: ImageElement,
+  slideNumbers: Map<string, number>,
+  t: Translate,
+) {
   // filters, tinting and rounded corners have no OOXML equivalent, so they are flattened
   // into the bitmap before it is embedded
   const src = await bakeImage(el)
@@ -393,7 +421,7 @@ async function addImage(slide: PptxSlide, el: ImageElement, slideNumbers: Map<st
     ...frameOf(el),
     data: isData ? src : undefined,
     path: isData ? undefined : src,
-    altText: el.name,
+    altText: elementLabel(el, t),
     flipH: el.flipH || undefined,
     flipV: el.flipV || undefined,
     // a fully round image is expressible natively; anything less was baked in above
@@ -487,11 +515,11 @@ function addTable(slide: PptxSlide, el: TableElement) {
         options: {
           colspan: cell.colspan > 1 ? cell.colspan : undefined,
           rowspan: cell.rowspan > 1 ? cell.rowspan : undefined,
-          fill: { color: toHex(cellFill(el, cell, r), "FFFFFF") },
-          color: toHex(cell.color ?? (isHeader(el, r) ? "#ffffff" : "#111827")),
+          fill: { color: toHex(cellBackground(el, cell, r), "FFFFFF") },
+          color: toHex(cellTextColor(el, cell, r)),
           fontSize: pt(cell.fontSize ?? el.fontSize),
           fontFace: primaryFont(el.fontFamily),
-          bold: cell.bold ?? isHeader(el, r),
+          bold: cell.bold ?? isHeaderRow(el, r),
           italic: cell.italic,
           underline: cell.underline ? ({ style: "sng" } as const) : undefined,
           align: cell.align === "justify" ? ("left" as const) : cell.align ?? ("left" as const),
@@ -511,24 +539,6 @@ function addTable(slide: PptxSlide, el: TableElement) {
   })
 }
 
-const isHeader = (el: TableElement, row: number) => el.theme.rowHeader && row === 0
-
-function cellFill(el: TableElement, cell: { fill?: string }, row: number) {
-  if (cell.fill) return cell.fill
-  if (isHeader(el, row)) return el.theme.color
-  if (el.theme.banded && row % 2 === 0) return tint(el.theme.color, 0.88)
-  return "#ffffff"
-}
-
-/** Mixes a colour towards white — used for banded table rows. */
-export function tint(color: string, amount: number): string {
-  const hex = toHex(color)
-  const mix = (channel: number) => Math.round(channel + (255 - channel) * amount)
-  return `#${[0, 2, 4]
-    .map((i) => mix(parseInt(hex.slice(i, i + 2), 16)).toString(16).padStart(2, "0"))
-    .join("")}`
-}
-
 /** `ChartType` is an instance member of PptxGenJS, but CHART_NAME is just a string union. */
 const CHART_NAME_BY_TYPE: Record<ChartElement["chartType"], PptxGenJS.CHART_NAME> = {
   // a vertical "column" chart is a bar chart with barDir: "col"
@@ -542,14 +552,14 @@ const CHART_NAME_BY_TYPE: Record<ChartElement["chartType"], PptxGenJS.CHART_NAME
   radar: "radar",
 }
 
-function addChart(slide: PptxSlide, el: ChartElement) {
+function addChart(slide: PptxSlide, el: ChartElement, t: Translate) {
   const isPie = el.chartType === "pie" || el.chartType === "doughnut"
   const type = CHART_NAME_BY_TYPE[el.chartType]
 
   const data = isPie
     ? [
         {
-          name: el.data.series[0]?.name ?? "系列 1",
+          name: el.data.series[0]?.name || t("chart.series", { n: 1 }),
           labels: el.data.categories,
           values: el.data.series[0]?.values ?? [],
         },

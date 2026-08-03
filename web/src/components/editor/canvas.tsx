@@ -17,6 +17,7 @@ import {
   type ResizeHandle,
 } from "@/lib/geometry"
 import { computeSnap, type GuideLine } from "@/lib/snapping"
+import { useT } from "@/lib/i18n/client"
 import { useEditor } from "@/store/editor"
 import type { LineElement, ShapeElement, SlideElement, TextElement } from "@/types/slides"
 import { CanvasContextMenu } from "./context-menu"
@@ -93,6 +94,7 @@ function LineEndpoints({
 }
 
 export function Canvas() {
+  const t = useT()
   const slides = useEditor((s) => s.slides)
   const slideIndex = useEditor((s) => s.slideIndex)
   const activeIds = useEditor((s) => s.activeIds)
@@ -460,7 +462,7 @@ export function Canvas() {
               top: sized ? box!.top : point.y,
               width: sized ? box!.width : 320,
               height: sized ? Math.max(40, box!.height) : 48,
-              content: "双击编辑文字",
+              content: t("element.defaultText"),
             }),
           )
         } else if (tool.kind === "shape") {
@@ -509,7 +511,9 @@ export function Canvas() {
       document.removeEventListener("pointerup", onUp)
       document.removeEventListener("pointercancel", onUp)
     }
-  }, [toCanvas])
+    // `t` only changes when the language does, so the handlers are still bound once per
+    // session in practice — it is in the list because a new text box takes its prompt from it
+  }, [toCanvas, t])
 
   /** Two-finger pinch on the viewport zooms, the way every touch canvas is expected to. */
   const pinch = useRef<{ distance: number; scale: number } | null>(null)
@@ -550,11 +554,29 @@ export function Canvas() {
     if (touchPoints.current.size < 2) pinch.current = null
   }
 
-  const onWheel = (event: React.WheelEvent) => {
-    if (!event.ctrlKey && !event.metaKey) return
-    setAutoFit(false)
-    useEditor.getState().setCanvasScale(scale - event.deltaY * 0.002)
-  }
+  /**
+   * Ctrl/⌘ + wheel zooms the canvas and nothing else.
+   *
+   * React attaches `wheel` at the root as a *passive* listener, so `preventDefault` inside
+   * an `onWheel` prop is ignored — the browser went on treating the same gesture as page
+   * zoom, and one scroll shrank the canvas inside a shrinking page. Binding it here, on
+   * the element, with `passive: false` is the only way to claim the gesture.
+   */
+  useEffect(() => {
+    const node = viewportRef.current
+    if (!node) return
+    const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return
+      event.preventDefault()
+      setAutoFit(false)
+      const current = useEditor.getState().canvasScale
+      useEditor.getState().setCanvasScale(current - event.deltaY * 0.002)
+    }
+    node.addEventListener("wheel", onWheel, { passive: false })
+    return () => node.removeEventListener("wheel", onWheel)
+  }, [])
+
+
 
   const frameBox =
     activeElements.length === 1
@@ -576,7 +598,6 @@ export function Canvas() {
       <div
         ref={viewportRef}
         className="flex flex-1 items-center justify-center overflow-auto p-4 sm:p-10"
-        onWheel={onWheel}
         onPointerDown={onViewportPointerDown}
         onPointerMove={onViewportPointerMove}
         onPointerUp={onViewportPointerUp}
@@ -769,7 +790,7 @@ export function Canvas() {
           variant="ghost"
           size="icon"
           className="size-7"
-          aria-label="缩小"
+          aria-label={t("editor.zoomOut")}
           onClick={() => {
             setAutoFit(false)
             useEditor.getState().setCanvasScale(scale - 0.1)
@@ -777,14 +798,18 @@ export function Canvas() {
         >
           <Minus className="size-3.5" />
         </Button>
-        <span className="w-12 text-center tabular-nums" aria-live="polite" aria-label={`缩放 ${Math.round(scale * 100)}%`}>
+        <span
+          className="w-12 text-center tabular-nums"
+          aria-live="polite"
+          aria-label={t("editor.zoomLabel", { percent: Math.round(scale * 100) })}
+        >
           {Math.round(scale * 100)}%
         </span>
         <Button
           variant="ghost"
           size="icon"
           className="size-7"
-          aria-label="放大"
+          aria-label={t("editor.zoomIn")}
           onClick={() => {
             setAutoFit(false)
             useEditor.getState().setCanvasScale(scale + 0.1)
@@ -796,7 +821,7 @@ export function Canvas() {
           variant="ghost"
           size="icon"
           className="size-7"
-          aria-label="适应窗口"
+          aria-label={t("editor.fitToWindow")}
           aria-pressed={autoFit}
           onClick={() => setAutoFit(true)}
         >

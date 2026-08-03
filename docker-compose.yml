@@ -1,19 +1,27 @@
+# Three secrets have no default and the stack refuses to start without them: the session
+# signing key, the database password and the object-store keys. They used to fall back to
+# `pptgo` / `pptgoadmin`, which meant the documented one-liner — `cp .env.example .env &&
+# docker compose up -d` — brought up a host whose object store answered to a credential
+# printed in this repository.
+#
+# Postgres and rustfs are also published to loopback only. They are published at all just
+# so a `npm run dev` running outside Docker can reach them; the web container talks to
+# them over the compose network and never needs the host side. Set POSTGRES_BIND /
+# RUSTFS_BIND to 0.0.0.0 to widen that deliberately.
 services:
   postgres:
     image: postgres:17-alpine
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-pptgo}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pptgo}
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env, generate one with openssl rand -base64 24}"
       POSTGRES_DB: ${POSTGRES_DB:-pptgo}
     volumes:
       - postgres-data:/var/lib/postgresql/data
     ports:
-      # Published only so `npm run dev` outside Docker can reach it — the web container
-      # talks to `postgres:5432` on the internal network either way. The host side
-      # deliberately avoids 5432: a machine that already runs Postgres is the common case,
-      # and nothing here needs the conventional port.
-      - "${POSTGRES_PORT:-5433}:5432"
+      # The host side deliberately avoids 5432: a machine that already runs Postgres is
+      # the common case, and nothing here needs the conventional port.
+      - "${POSTGRES_BIND:-127.0.0.1}:${POSTGRES_PORT:-5433}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pptgo} -d ${POSTGRES_DB:-pptgo}"]
       interval: 5s
@@ -31,16 +39,16 @@ services:
       RUSTFS_VOLUMES: /data
       RUSTFS_ADDRESS: 0.0.0.0:9000
       RUSTFS_CONSOLE_ADDRESS: 0.0.0.0:9001
-      RUSTFS_CONSOLE_ENABLE: "true"
-      RUSTFS_ACCESS_KEY: ${S3_ACCESS_KEY_ID:-pptgoadmin}
-      RUSTFS_SECRET_KEY: ${S3_SECRET_ACCESS_KEY:-pptgoadmin}
+      RUSTFS_CONSOLE_ENABLE: "${RUSTFS_CONSOLE_ENABLE:-true}"
+      RUSTFS_ACCESS_KEY: "${S3_ACCESS_KEY_ID:?set S3_ACCESS_KEY_ID in .env}"
+      RUSTFS_SECRET_KEY: "${S3_SECRET_ACCESS_KEY:?set S3_SECRET_ACCESS_KEY in .env, generate one with openssl rand -base64 24}"
     volumes:
       - rustfs-data:/data
     ports:
       # 9000/9001 are what MinIO and rustfs conventionally take, so the host side steps
       # aside here too; inside the network the app still uses http://rustfs:9000
-      - "${RUSTFS_API_PORT:-9100}:9000" # S3 API
-      - "${RUSTFS_CONSOLE_PORT:-9101}:9001" # console, for looking at what is stored
+      - "${RUSTFS_BIND:-127.0.0.1}:${RUSTFS_API_PORT:-9100}:9000" # S3 API
+      - "${RUSTFS_BIND:-127.0.0.1}:${RUSTFS_CONSOLE_PORT:-9101}:9001" # console
 
   web:
     build:
@@ -52,15 +60,15 @@ services:
       rustfs:
         condition: service_started
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-pptgo}:${POSTGRES_PASSWORD:-pptgo}@postgres:5432/${POSTGRES_DB:-pptgo}
+      DATABASE_URL: postgres://${POSTGRES_USER:-pptgo}:${POSTGRES_PASSWORD:?}@postgres:5432/${POSTGRES_DB:-pptgo}
 
       # Auth.js. AUTH_URL is the public origin users reach — Google compares it against
       # the redirect URI registered in the console.
       #
-      # AUTH_SECRET is the one hard requirement: it signs the session cookie, and Auth.js
-      # refuses to start without it. The Google pair is not, so the stack still comes up
-      # with the landing page and the sign-in-free editor working; pressing the sign-in
-      # button then lands on /login?error=Configuration, which says what is missing.
+      # AUTH_SECRET signs the session cookie and Auth.js refuses to start without it. The
+      # Google pair is optional, so the stack still comes up with the landing page and the
+      # sign-in-free editor working; pressing the sign-in button then lands on
+      # /login?error=Configuration, which says what is missing.
       AUTH_SECRET: "${AUTH_SECRET:?set AUTH_SECRET in .env, generate one with openssl rand -base64 32}"
       AUTH_URL: "${AUTH_URL:-http://localhost:3000}"
       AUTH_TRUST_HOST: "true"
@@ -70,10 +78,10 @@ services:
       S3_ENDPOINT: http://rustfs:9000
       S3_REGION: ${S3_REGION:-us-east-1}
       S3_BUCKET: ${S3_BUCKET:-pptgo}
-      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-pptgoadmin}
-      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-pptgoadmin}
+      S3_ACCESS_KEY_ID: "${S3_ACCESS_KEY_ID:?}"
+      S3_SECRET_ACCESS_KEY: "${S3_SECRET_ACCESS_KEY:?}"
     ports:
-      - "${WEB_PORT:-3000}:3000"
+      - "${WEB_BIND:-0.0.0.0}:${WEB_PORT:-3000}:3000"
 
 volumes:
   postgres-data:

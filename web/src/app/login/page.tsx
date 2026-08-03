@@ -5,17 +5,20 @@ import { currentUser } from "@/auth"
 import { signInWithGoogle } from "@/app/actions/auth"
 import { GoogleButton } from "@/components/site/google-button"
 import { Wordmark } from "@/components/site/wordmark"
+import { getLocale } from "@/lib/i18n/server"
+import { translator } from "@/lib/i18n/translate"
+import type { MessageKey } from "@/lib/i18n/messages"
 
-export const metadata = {
-  title: "登录 · PPTGo",
+export async function generateMetadata() {
+  return { title: translator(await getLocale())("login.metaTitle") }
 }
 
 /** Auth.js appends `?error=…` on a failed callback; these are the ones worth naming. */
-const ERRORS: Record<string, string> = {
-  OAuthAccountNotLinked: "这个邮箱已经用别的方式登录过了，请换一个 Google 账号。",
-  AccessDenied: "Google 拒绝了这次登录请求。",
-  Configuration: "服务端 Google 登录配置有误，请检查 AUTH_GOOGLE_ID 与 AUTH_GOOGLE_SECRET。",
-  Verification: "登录链接已失效，请重新登录。",
+const ERRORS: Record<string, MessageKey> = {
+  OAuthAccountNotLinked: "login.error.OAuthAccountNotLinked",
+  AccessDenied: "login.error.AccessDenied",
+  Configuration: "login.error.Configuration",
+  Verification: "login.error.Verification",
 }
 
 export default async function LoginPage({
@@ -24,6 +27,7 @@ export default async function LoginPage({
   searchParams: Promise<{ next?: string; error?: string }>
 }) {
   const { next, error } = await searchParams
+  const t = translator(await getLocale())
   const target = next && next.startsWith("/") && !next.startsWith("//") ? next : "/dashboard"
 
   if (await currentUser()) redirect(target)
@@ -40,7 +44,7 @@ export default async function LoginPage({
           className="inline-flex items-center gap-1.5 font-mono text-[11px] tracking-[0.2em] text-muted-foreground uppercase transition-colors hover:text-primary"
         >
           <ArrowLeft className="size-3.5" />
-          返回首页
+          {t("login.back")}
         </Link>
       </header>
 
@@ -61,21 +65,22 @@ export default async function LoginPage({
 
           <div className="rise border border-border bg-card p-8 shadow-[var(--sheet-shadow)] sm:p-10">
             <p className="font-mono text-[11px] tracking-[0.28em] text-primary uppercase">
-              Sign in
+              {t("login.kicker")}
             </p>
             <h1 className="mt-5 text-3xl leading-tight font-black tracking-[-0.03em]">
-              登录后，
+              {t("login.headingLine1")}
               <br />
-              稿子跟着账号走
+              {t("login.headingLine2")}
             </h1>
             <p className="mt-4 text-sm leading-[1.85] text-muted-foreground">
-              PPTGo 只支持 Google 账号登录，不设密码。登录后新建的演示文稿会自动保存到云端，
-              换台设备打开还是同一份。
+              {t("login.body")}
             </p>
 
             {error && (
               <p className="mt-6 border-l-2 border-destructive bg-destructive/12 px-4 py-3 text-sm leading-relaxed text-foreground">
-                {ERRORS[error] ?? `登录失败（${error}），请重试。`}
+                {ERRORS[error]
+                  ? t(ERRORS[error])
+                  : t("login.error.generic", { code: error })}
               </p>
             )}
 
@@ -87,7 +92,7 @@ export default async function LoginPage({
             <div className="mt-8 flex items-center gap-4">
               <span className="h-px flex-1 bg-border" />
               <span className="font-mono text-[10px] tracking-[0.24em] text-muted-foreground uppercase">
-                or
+                {t("login.or")}
               </span>
               <span className="h-px flex-1 bg-border" />
             </div>
@@ -96,11 +101,11 @@ export default async function LoginPage({
               href="/editor"
               className="mt-6 flex h-12 items-center justify-center border border-border text-sm font-medium transition-colors hover:border-foreground/40 hover:bg-muted"
             >
-              不登录，用本地编辑器
+              {t("login.localEditor")}
             </Link>
 
             <p className="mt-8 font-mono text-[10px] leading-relaxed tracking-wider text-muted-foreground/80">
-              我们只读取 Google 账号的邮箱、昵称和头像，用于识别你的演示文稿。
+              {t("login.scopeNote")}
             </p>
           </div>
         </div>

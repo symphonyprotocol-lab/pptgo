@@ -1,38 +1,57 @@
 import { NextResponse } from "next/server"
 import { currentUser } from "@/auth"
 import {
-  MAX_DECK_BYTES,
+  MAX_DECKS_PER_OWNER,
+  MAX_REQUEST_BYTES,
   blankDeck,
+  countDecks,
   createDeck,
+  encodeDeck,
   listDecks,
   parseDeck,
 } from "@/lib/decks"
+import { readJsonObject } from "@/lib/http"
+import { getLocale } from "@/lib/i18n/server"
+import { translator } from "@/lib/i18n/translate"
 
 export async function GET() {
   const user = await currentUser()
-  if (!user) return NextResponse.json({ error: "未登录" }, { status: 401 })
+  const t = translator(await getLocale())
+  if (!user) return NextResponse.json({ error: t("api.unauthorized") }, { status: 401 })
 
   return NextResponse.json({ decks: await listDecks(user.id) })
 }
 
 export async function POST(request: Request) {
   const user = await currentUser()
-  if (!user) return NextResponse.json({ error: "未登录" }, { status: 401 })
+  const t = translator(await getLocale())
+  if (!user) return NextResponse.json({ error: t("api.unauthorized") }, { status: 401 })
 
-  const body = await request.json().catch(() => null)
-  if (typeof body !== "object" || body === null) {
-    return NextResponse.json({ error: "请求体不是合法 JSON" }, { status: 400 })
+  const body = await readJsonObject(request, MAX_REQUEST_BYTES)
+  if (!body.ok) {
+    return body.reason === "too-large"
+      ? NextResponse.json({ error: t("api.deckTooLarge") }, { status: 413 })
+      : NextResponse.json({ error: t("api.badJson") }, { status: 400 })
   }
 
-  const { deck: raw, title } = body as { deck?: unknown; title?: unknown }
-  const deck = raw === undefined
-    ? blankDeck(typeof title === "string" && title.trim() ? title.trim() : "未命名演示文稿")
-    : parseDeck(raw)
+  const { deck: raw, title } = body.value as { deck?: unknown; title?: unknown }
+  const deck =
+    raw === undefined
+      ? blankDeck(typeof title === "string" && title.trim() ? title.trim() : t("deck.untitled"))
+      : parseDeck(raw)
 
-  if (!deck) return NextResponse.json({ error: "演示文稿格式不正确" }, { status: 400 })
-  if (JSON.stringify(deck).length > MAX_DECK_BYTES) {
-    return NextResponse.json({ error: "演示文稿超过 25MB 上限" }, { status: 413 })
+  if (!deck) return NextResponse.json({ error: t("api.badDeck") }, { status: 400 })
+
+  const encoded = encodeDeck(deck)
+  if (!encoded) return NextResponse.json({ error: t("api.deckTooLarge") }, { status: 413 })
+
+  // an account that can create decks without limit is an account that can fill the bucket
+  if ((await countDecks(user.id)) >= MAX_DECKS_PER_OWNER) {
+    return NextResponse.json(
+      { error: t("api.deckLimit", { limit: MAX_DECKS_PER_OWNER }) },
+      { status: 409 },
+    )
   }
 
-  return NextResponse.json({ deck: await createDeck(user.id, deck) }, { status: 201 })
+  return NextResponse.json({ deck: await createDeck(user.id, deck, encoded) }, { status: 201 })
 }

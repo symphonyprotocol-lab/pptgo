@@ -58,6 +58,59 @@ describe("sanitizeHtml", () => {
     const html = "<ul><li><b>a</b></li><li><sup>2</sup></li></ul>"
     expect(sanitizeHtml(html)).toBe(html)
   })
+
+  /**
+   * Foreign content preserves the author's case, so `<svg>` arrives with `tagName` of
+   * "svg" and never matched the upper-case DROP_TAGS entry that was meant to catch it.
+   * The elements happened to be unwrapped instead — safe by accident, and only for as
+   * long as no one added a lower-case name to ALLOWED_TAGS.
+   */
+  it("drops SVG and MathML subtrees, whatever case they were written in", () => {
+    expect(sanitizeHtml("<svg><circle r='1'/></svg>")).toBe("")
+    expect(sanitizeHtml("<SVG><CIRCLE r='1'/></SVG>")).toBe("")
+    expect(sanitizeHtml("<svg><script>alert(1)</script></svg>")).toBe("")
+    expect(sanitizeHtml("<math><mtext>x</mtext></math>")).toBe("")
+    expect(sanitizeHtml("<div>before<svg><text>gone</text></svg>after</div>")).toBe(
+      "<div>beforeafter</div>",
+    )
+  })
+
+  it("drops the foreign-content wrappers that flip the parser's context", () => {
+    const html = '<math><annotation-xml encoding="text/html"><script>alert(1)</script>'
+    expect(sanitizeHtml(html)).toBe("")
+    expect(sanitizeHtml("<svg><foreignObject><div onclick='x'>hi</div></foreignObject></svg>")).toBe(
+      "",
+    )
+  })
+
+  it("settles on a fixed point, so what is stored survives being re-parsed", () => {
+    const samples = [
+      '<b onclick="x">hi</b>',
+      "<article><img src=x onerror=alert(1)></article>",
+      "<div><svg><style>a{}</style></svg>text</div>",
+      "<ul><li><b>a</b></li></ul>",
+      "<p>a<br>b</p>",
+    ]
+    for (const sample of samples) {
+      const once = sanitizeHtml(sample)
+      expect(sanitizeHtml(once)).toBe(once)
+    }
+  })
+
+  it("refuses to run without a DOM instead of silently returning nothing", () => {
+    const { window: real } = globalThis as { window?: unknown }
+    // @ts-expect-error -- deleting the global is the point
+    delete globalThis.window
+    try {
+      expect(() => sanitizeHtml("<b>hi</b>")).toThrow(/DOM/)
+    } finally {
+      ;(globalThis as { window?: unknown }).window = real
+    }
+  })
+
+  it("returns an empty string for empty input without touching the DOM", () => {
+    expect(sanitizeHtml("")).toBe("")
+  })
 })
 
 describe("htmlToPlainText", () => {

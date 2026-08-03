@@ -89,13 +89,13 @@ function loadImage(src: string): Promise<HTMLImageElement> {
     // remote sources would otherwise taint the canvas and block toDataURL
     if (!src.startsWith("data:")) image.crossOrigin = "anonymous"
 
-    const timer = setTimeout(() => reject(new Error("图片读取超时")), LOAD_TIMEOUT)
+    const timer = setTimeout(() => reject(new Error("image load timed out")), LOAD_TIMEOUT)
     const settle = (fn: () => void) => {
       clearTimeout(timer)
       fn()
     }
     image.onload = () => settle(() => resolve(image))
-    image.onerror = () => settle(() => reject(new Error("图片读取失败")))
+    image.onerror = () => settle(() => reject(new Error("image failed to load")))
     image.src = src
   })
 }

@@ -11,9 +11,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { useT } from "@/lib/i18n/client"
 import type { SessionUser } from "@/auth"
 
 export function UserMenu({ user }: { user: SessionUser }) {
+  const t = useT()
   const initial = (user.name ?? user.email ?? "?").trim().charAt(0).toUpperCase()
 
   return (
@@ -49,7 +51,7 @@ export function UserMenu({ user }: { user: SessionUser }) {
         <DropdownMenuItem asChild>
           <Link href="/editor">
             <Presentation className="size-4" />
-            本地编辑器
+            {t("dashboard.localEditor")}
           </Link>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
@@ -58,7 +60,7 @@ export function UserMenu({ user }: { user: SessionUser }) {
           <DropdownMenuItem asChild variant="destructive">
             <button type="submit" className="w-full">
               <LogOut className="size-4" />
-              退出登录
+              {t("dashboard.signOut")}
             </button>
           </DropdownMenuItem>
         </form>

@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button"
 import { totalSteps } from "@/lib/animation"
 import { VIEWPORT_HEIGHT, VIEWPORT_WIDTH } from "@/lib/constants"
 import { cn } from "@/lib/utils"
+import { useT } from "@/lib/i18n/client"
 import type { Slide, TransitionType } from "@/types/slides"
 import { SlideThumbnail, SlideView } from "./slide-view"
 
@@ -44,6 +45,7 @@ const TRANSITION_ANIMATION: Record<TransitionType, string | undefined> = {
 const PEN_COLORS = ["#ef4444", "#22c55e", "#3b82f6", "#eab308", "#111827", "#ffffff"]
 
 export function PresentView({ slides, startIndex, onExit }: Props) {
+  const t = useT()
   const [index, setIndex] = useState(startIndex)
   const [step, setStep] = useState(0)
   const [scale, setScale] = useState(1)
@@ -146,18 +148,15 @@ export function PresentView({ slides, startIndex, onExit }: Props) {
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [advance, retreat, goTo, onExit, slides.length, tool])
 
-  // save the current slide's annotations before swapping in the next slide's
+  // annotations are saved per slide on pointer-up; this restores the saved one whenever
+  // the visible slide changes
   const slideId = slide.id
-  const previousSlideId = useRef(slideId)
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
     const ctx = canvas.getContext("2d")
     if (!ctx) return
 
-    if (previousSlideId.current !== slideId) {
-      previousSlideId.current = slideId
-    }
     ctx.clearRect(0, 0, canvas.width, canvas.height)
     const saved = strokes.current.get(slideId)
     if (saved) {
@@ -253,6 +252,23 @@ export function PresentView({ slides, startIndex, onExit }: Props) {
     else void rootRef.current?.requestFullscreen().catch(() => {})
   }
 
+  /**
+   * A link on an element, followed. A slide link jumps within the deck; a web link opens
+   * in a new tab, and `noopener` is what stops the opened page from reaching back through
+   * `window.opener` into a presentation that may be on a shared screen.
+   */
+  const followLink = useCallback(
+    (link: NonNullable<Slide["elements"][number]["link"]>) => {
+      if (link.type === "slide") {
+        const index = slides.findIndex((s) => s.id === link.target)
+        if (index >= 0) goTo(index)
+        return
+      }
+      window.open(link.target, "_blank", "noopener,noreferrer")
+    },
+    [slides, goTo],
+  )
+
   const transition = TRANSITION_ANIMATION[slide.transition ?? "none"]
 
   return (
@@ -284,7 +300,7 @@ export function PresentView({ slides, startIndex, onExit }: Props) {
             animationFillMode: "both",
           }}
         >
-          <SlideView slide={slide} animationStep={step} playable />
+          <SlideView slide={slide} animationStep={step} playable onFollowLink={followLink} />
         </div>
 
         {blackboard && <div className="absolute inset-0 bg-slate-900" />}
@@ -349,31 +365,31 @@ export function PresentView({ slides, startIndex, onExit }: Props) {
         className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full bg-white/10 px-2 py-1 backdrop-blur"
         onClick={(e) => e.stopPropagation()}
       >
-        <ControlButton title="上一步" onClick={retreat}>
+        <ControlButton title={t("present.previous")} onClick={retreat}>
           <ChevronLeft className="size-4" />
         </ControlButton>
         <span className="min-w-16 text-center text-xs text-white tabular-nums">
           {index + 1} / {slides.length}
           {stepCount > 0 && ` · ${step}/${stepCount}`}
         </span>
-        <ControlButton title="下一步" onClick={advance}>
+        <ControlButton title={t("present.next")} onClick={advance}>
           <ChevronRight className="size-4" />
         </ControlButton>
 
         <Separator />
 
-        <ControlButton title="画笔 (P)" active={tool === "pen"} onClick={() => setTool(tool === "pen" ? "none" : "pen")}>
+        <ControlButton title={t("present.pen")} active={tool === "pen"} onClick={() => setTool(tool === "pen" ? "none" : "pen")}>
           <Pen className="size-4" />
         </ControlButton>
         <ControlButton
-          title="荧光笔"
+          title={t("present.highlighter")}
           active={tool === "highlighter"}
           onClick={() => setTool(tool === "highlighter" ? "none" : "highlighter")}
         >
           <Highlighter className="size-4" />
         </ControlButton>
         <ControlButton
-          title="橡皮擦"
+          title={t("present.eraser")}
           active={tool === "eraser"}
           onClick={() => setTool(tool === "eraser" ? "none" : "eraser")}
         >
@@ -394,34 +410,34 @@ export function PresentView({ slides, startIndex, onExit }: Props) {
             ))}
           </div>
         )}
-        <ControlButton title="清除批注" onClick={clearAnnotations}>
+        <ControlButton title={t("present.clearAnnotations")} onClick={clearAnnotations}>
           <Trash2 className="size-4" />
         </ControlButton>
-        <ControlButton title="激光笔 (L)" active={!!laser} onClick={() => setLaser(laser ? null : { x: -100, y: -100 })}>
+        <ControlButton title={t("present.laser")} active={!!laser} onClick={() => setLaser(laser ? null : { x: -100, y: -100 })}>
           <MousePointer2 className="size-4" />
         </ControlButton>
-        <ControlButton title="黑板 (B)" active={blackboard} onClick={() => setBlackboard((v) => !v)}>
+        <ControlButton title={t("present.blackboard")} active={blackboard} onClick={() => setBlackboard((v) => !v)}>
           <Square className="size-4" />
         </ControlButton>
 
         <Separator />
 
-        <ControlButton title="自动放映" active={autoplay} onClick={() => setAutoplay((v) => !v)}>
+        <ControlButton title={t("present.autoplay")} active={autoplay} onClick={() => setAutoplay((v) => !v)}>
           {autoplay ? <Pause className="size-4" /> : <Play className="size-4" />}
         </ControlButton>
-        <ControlButton title="计时器" active={showTimer} onClick={() => setShowTimer((v) => !v)}>
+        <ControlButton title={t("present.timer")} active={showTimer} onClick={() => setShowTimer((v) => !v)}>
           <Timer className="size-4" />
         </ControlButton>
-        <ControlButton title="缩略图" active={showThumbs} onClick={() => setShowThumbs((v) => !v)}>
+        <ControlButton title={t("present.thumbnails")} active={showThumbs} onClick={() => setShowThumbs((v) => !v)}>
           <LayoutGrid className="size-4" />
         </ControlButton>
-        <ControlButton title="备注 (N)" active={showNotes} onClick={() => setShowNotes((v) => !v)}>
+        <ControlButton title={t("present.notes")} active={showNotes} onClick={() => setShowNotes((v) => !v)}>
           <StickyNote className="size-4" />
         </ControlButton>
-        <ControlButton title="全屏" onClick={toggleFullscreen}>
+        <ControlButton title={t("present.fullscreen")} onClick={toggleFullscreen}>
           <Maximize className="size-4" />
         </ControlButton>
-        <ControlButton title="退出 (Esc)" onClick={onExit}>
+        <ControlButton title={t("present.exit")} onClick={onExit}>
           <X className="size-4" />
         </ControlButton>
       </div>

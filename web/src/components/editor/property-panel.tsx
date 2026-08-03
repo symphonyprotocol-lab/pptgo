@@ -38,6 +38,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { ANIMATIONS, CHART_TYPES, FONT_FAMILIES, FONT_SIZES, TRANSITIONS } from "@/lib/constants"
 import { cn } from "@/lib/utils"
+import { useT } from "@/lib/i18n/client"
+import type { MessageKey } from "@/lib/i18n/messages"
 import { useEditor } from "@/store/editor"
 import type {
   AnimationEffect,
@@ -57,10 +59,11 @@ import { LayerPanel } from "./layer-panel"
 
 const record = () => useEditor.getState().commit()
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
+function Row({ label, children }: { label: MessageKey; children: React.ReactNode }) {
+  const t = useT()
   return (
     <div className="flex items-center justify-between gap-3">
-      <Label className="shrink-0 text-xs font-normal text-muted-foreground">{label}</Label>
+      <Label className="shrink-0 text-xs font-normal text-muted-foreground">{t(label)}</Label>
       <div className="flex min-w-0 items-center gap-1.5">{children}</div>
     </div>
   )
@@ -74,11 +77,14 @@ function NumberField({
   value,
   onChange,
   step = 1,
+  min,
   className = "h-8 w-20",
 }: {
   value: number
   onChange: (value: number) => void
   step?: number
+  /** floor applied to what the user typed, for fields where zero is not a size */
+  min?: number
   className?: string
 }) {
   const dirty = useRef(false)
@@ -86,16 +92,23 @@ function NumberField({
     <Input
       type="number"
       step={step}
+      min={min}
       value={Math.round(value * 100) / 100}
       onFocus={() => {
         dirty.current = false
       }}
       onChange={(e) => {
+        // An emptied box, or one holding "-" mid-typing, parses as NaN — and `Number("")`
+        // is 0, which is how deleting the contents of the width field collapsed the
+        // element to nothing and left it unselectable. Neither is an edit yet: the field
+        // keeps what it had until a real number arrives.
+        const next = Number(e.target.value)
+        if (e.target.value === "" || !Number.isFinite(next)) return
         if (!dirty.current) {
           dirty.current = true
           record()
         }
-        onChange(Number(e.target.value))
+        onChange(min === undefined ? next : Math.max(min, next))
       }}
       className={className}
     />
@@ -110,17 +123,18 @@ function SliderRow({
   step = 1,
   onChange,
 }: {
-  label: string
+  label: MessageKey
   value: number
   min: number
   max: number
   step?: number
   onChange: (value: number) => void
 }) {
+  const t = useT()
   return (
     <div className="space-y-1.5">
       <div className="flex justify-between text-xs text-muted-foreground">
-        <span>{label}</span>
+        <span>{t(label)}</span>
         <span className="tabular-nums">{value}</span>
       </div>
       <Slider
@@ -140,7 +154,7 @@ function SwitchRow({
   checked,
   onChange,
 }: {
-  label: string
+  label: MessageKey
   checked: boolean
   onChange: (checked: boolean) => void
 }) {
@@ -158,6 +172,7 @@ function SwitchRow({
 }
 
 export function PropertyPanel({ className }: { className?: string } = {}) {
+  const t = useT()
   const slides = useEditor((s) => s.slides)
   const slideIndex = useEditor((s) => s.slideIndex)
   const activeIds = useEditor((s) => s.activeIds)
@@ -182,13 +197,13 @@ export function PropertyPanel({ className }: { className?: string } = {}) {
       >
         <TabsList className="mx-3 mt-3 grid grid-cols-4">
           <TabsTrigger value="style" disabled={!selected.length}>
-            样式
+            {t("panel.tabStyle")}
           </TabsTrigger>
           <TabsTrigger value="position" disabled={!selected.length}>
-            位置
+            {t("panel.tabPosition")}
           </TabsTrigger>
-          <TabsTrigger value="animation">动画</TabsTrigger>
-          <TabsTrigger value="slide">页面</TabsTrigger>
+          <TabsTrigger value="animation">{t("panel.tabAnimation")}</TabsTrigger>
+          <TabsTrigger value="slide">{t("panel.tabSlide")}</TabsTrigger>
         </TabsList>
 
         <div className="min-h-0 flex-1 overflow-y-auto p-3">
@@ -204,13 +219,15 @@ export function PropertyPanel({ className }: { className?: string } = {}) {
             )}
             {single?.type === "formula" && <FormulaPanel el={single} patch={patch} />}
             {!single && selected.length > 1 && (
-              <p className="text-xs text-muted-foreground">已选中 {selected.length} 个元素</p>
+              <p className="text-xs text-muted-foreground">
+                {t("panel.multiSelection", { count: selected.length })}
+              </p>
             )}
             {!!selected.length && (
               <>
                 <Separator />
                 <SliderRow
-                  label="不透明度"
+                  label="panel.opacity"
                   value={Math.round((single?.opacity ?? 1) * 100)}
                   min={0}
                   max={100}
@@ -224,21 +241,21 @@ export function PropertyPanel({ className }: { className?: string } = {}) {
           <TabsContent value="position" className="mt-0 space-y-3">
             {single && (
               <>
-                <Row label="X / Y">
+                <Row label="panel.position">
                   <NumberField value={single.left} onChange={(v) => patch({ left: v })} />
                   <NumberField value={single.top} onChange={(v) => patch({ top: v })} />
                 </Row>
-                <Row label="宽 / 高">
+                <Row label="panel.size">
                   <NumberField value={single.width} onChange={(v) => patch({ width: v })} />
                   <NumberField value={single.height} onChange={(v) => patch({ height: v })} />
                 </Row>
-                <Row label="旋转">
+                <Row label="panel.rotation">
                   <NumberField value={single.rotate} onChange={(v) => patch({ rotate: v })} />
                   <Button
                     variant="outline"
                     size="icon"
                     className="size-8"
-                    title={single.lock ? "解锁" : "锁定"}
+                    title={single.lock ? t("panel.unlock") : t("panel.lock")}
                     onClick={() => useEditor.getState().toggleLock([single.id])}
                   >
                     {single.lock ? <Lock className="size-4" /> : <Unlock className="size-4" />}
@@ -250,12 +267,12 @@ export function PropertyPanel({ className }: { className?: string } = {}) {
             <div className="grid grid-cols-3 gap-1.5">
               {(
                 [
-                  ["left", "左对齐"],
-                  ["center", "水平居中"],
-                  ["right", "右对齐"],
-                  ["top", "顶对齐"],
-                  ["middle", "垂直居中"],
-                  ["bottom", "底对齐"],
+                  ["left", "editor.alignLeft"],
+                  ["center", "editor.alignCenter"],
+                  ["right", "editor.alignRight"],
+                  ["top", "editor.alignTop"],
+                  ["middle", "editor.alignMiddle"],
+                  ["bottom", "editor.alignBottom"],
                 ] as const
               ).map(([key, label]) => (
                 <Button
@@ -265,7 +282,7 @@ export function PropertyPanel({ className }: { className?: string } = {}) {
                   className="text-xs"
                   onClick={() => useEditor.getState().alignElements(key)}
                 >
-                  {label}
+                  {t(label)}
                 </Button>
               ))}
             </div>
@@ -277,7 +294,7 @@ export function PropertyPanel({ className }: { className?: string } = {}) {
                 disabled={selected.length < 3}
                 onClick={() => useEditor.getState().distributeElements("h")}
               >
-                水平等距
+                {t("panel.distributeH")}
               </Button>
               <Button
                 variant="outline"
@@ -286,7 +303,7 @@ export function PropertyPanel({ className }: { className?: string } = {}) {
                 disabled={selected.length < 3}
                 onClick={() => useEditor.getState().distributeElements("v")}
               >
-                垂直等距
+                {t("panel.distributeV")}
               </Button>
             </div>
           </TabsContent>
@@ -296,7 +313,7 @@ export function PropertyPanel({ className }: { className?: string } = {}) {
           </TabsContent>
 
           <TabsContent value="slide" className="mt-0 space-y-4">
-            <Row label="背景类型">
+            <Row label="panel.backgroundType">
               <Select
                 value={slide.background.type}
                 onValueChange={(value) =>
@@ -321,15 +338,15 @@ export function PropertyPanel({ className }: { className?: string } = {}) {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="solid">纯色</SelectItem>
-                  <SelectItem value="gradient">渐变</SelectItem>
-                  <SelectItem value="image">图片</SelectItem>
+                  <SelectItem value="solid">{t("panel.solid")}</SelectItem>
+                  <SelectItem value="gradient">{t("panel.gradient")}</SelectItem>
+                  <SelectItem value="image">{t("panel.image")}</SelectItem>
                 </SelectContent>
               </Select>
             </Row>
 
             {slide.background.type === "solid" && (
-              <Row label="颜色">
+              <Row label="panel.color">
                 <ColorPicker
                   value={slide.background.color}
                   onChange={(color) =>
@@ -341,7 +358,7 @@ export function PropertyPanel({ className }: { className?: string } = {}) {
 
             {slide.background.type === "gradient" && slide.background.gradient && (
               <>
-                <Row label="起止色">
+                <Row label="panel.gradientStops">
                   <ColorPicker
                     value={slide.background.gradient.stops[0].color}
                     onChange={(color) =>
@@ -368,7 +385,7 @@ export function PropertyPanel({ className }: { className?: string } = {}) {
                   />
                 </Row>
                 <SliderRow
-                  label="角度"
+                  label="panel.angle"
                   value={slide.background.gradient.rotate}
                   min={0}
                   max={360}
@@ -401,7 +418,7 @@ export function PropertyPanel({ className }: { className?: string } = {}) {
                     reader.readAsDataURL(file)
                   }}
                 />
-                <Row label="填充方式">
+                <Row label="panel.imageFit">
                   <Select
                     value={slide.background.imageSize ?? "cover"}
                     onValueChange={(value) =>
@@ -415,9 +432,9 @@ export function PropertyPanel({ className }: { className?: string } = {}) {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="cover">铺满</SelectItem>
-                      <SelectItem value="contain">适应</SelectItem>
-                      <SelectItem value="repeat">平铺</SelectItem>
+                      <SelectItem value="cover">{t("panel.fitCover")}</SelectItem>
+                      <SelectItem value="contain">{t("panel.fitContain")}</SelectItem>
+                      <SelectItem value="repeat">{t("panel.fitRepeat")}</SelectItem>
                     </SelectContent>
                   </Select>
                 </Row>
@@ -430,11 +447,11 @@ export function PropertyPanel({ className }: { className?: string } = {}) {
               className="w-full text-xs"
               onClick={() => useEditor.getState().applyBackgroundToAll()}
             >
-              应用到全部幻灯片
+              {t("panel.applyToAll")}
             </Button>
 
             <Separator />
-            <Row label="切换动画">
+            <Row label="panel.transition">
               <Select
                 value={slide.transition ?? "none"}
                 onValueChange={(value) => useEditor.getState().setTransition(value as TransitionType)}
@@ -443,9 +460,9 @@ export function PropertyPanel({ className }: { className?: string } = {}) {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {TRANSITIONS.map((t) => (
-                    <SelectItem key={t.value} value={t.value}>
-                      {t.label}
+                  {TRANSITIONS.map((transition) => (
+                    <SelectItem key={transition.value} value={transition.value}>
+                      {t(transition.labelKey)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -453,10 +470,10 @@ export function PropertyPanel({ className }: { className?: string } = {}) {
             </Row>
 
             <div className="space-y-1.5">
-              <Label className="text-xs font-normal text-muted-foreground">分节标题</Label>
+              <Label className="text-xs font-normal text-muted-foreground">{t("panel.sectionTitle")}</Label>
               <Input
                 value={slide.section ?? ""}
-                placeholder="留空表示不新建分节"
+                placeholder={t("panel.sectionPlaceholder")}
                 className="h-8 text-xs"
                 onChange={(e) => useEditor.getState().setSection(e.target.value || undefined)}
               />
@@ -464,13 +481,13 @@ export function PropertyPanel({ className }: { className?: string } = {}) {
 
             <Separator />
             <div className="space-y-1.5">
-              <Label className="text-xs font-normal text-muted-foreground">演讲者备注</Label>
+              <Label className="text-xs font-normal text-muted-foreground">{t("panel.notes")}</Label>
               <textarea
                 value={slide.notes}
                 onChange={(e) => useEditor.getState().setNotes(e.target.value)}
                 rows={5}
                 className="w-full resize-none rounded-md border bg-transparent p-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                placeholder="仅在放映的演讲者视图中可见"
+                placeholder={t("panel.notesPlaceholder")}
               />
             </div>
           </TabsContent>
@@ -485,12 +502,13 @@ export function PropertyPanel({ className }: { className?: string } = {}) {
 type Patch = (p: Partial<SlideElement>) => void
 
 function LinkRow({ el }: { el: SlideElement }) {
+  const t = useT()
   const slides = useEditor((s) => s.slides)
   const [draft, setDraft] = useState(el.link?.type === "web" ? el.link.target : "")
 
   return (
     <div className="space-y-2">
-      <Row label="超链接">
+      <Row label="panel.hyperlink">
         <Select
           value={el.link?.type ?? "none"}
           onValueChange={(value) => {
@@ -504,9 +522,9 @@ function LinkRow({ el }: { el: SlideElement }) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="none">无</SelectItem>
-            <SelectItem value="web">网页</SelectItem>
-            <SelectItem value="slide">跳转到页</SelectItem>
+            <SelectItem value="none">{t("panel.linkNone")}</SelectItem>
+            <SelectItem value="web">{t("panel.linkWeb")}</SelectItem>
+            <SelectItem value="slide">{t("panel.linkSlide")}</SelectItem>
           </SelectContent>
         </Select>
         <Link2 className="size-4 text-muted-foreground" />
@@ -532,7 +550,7 @@ function LinkRow({ el }: { el: SlideElement }) {
           <SelectContent>
             {slides.map((s, i) => (
               <SelectItem key={s.id} value={s.id}>
-                第 {i + 1} 页
+                {t("panel.slideNumber", { index: i + 1 })}
               </SelectItem>
             ))}
           </SelectContent>
@@ -582,19 +600,19 @@ function ShadowControls({
   return (
     <div className="space-y-2">
       <SwitchRow
-        label="阴影"
+        label="panel.shadow"
         checked={!!shadow}
         onChange={(on) => onChange(on ? current : undefined)}
       />
       {shadow && (
         <>
-          <Row label="偏移 / 颜色">
+          <Row label="panel.shadowOffset">
             <NumberField value={shadow.h} onChange={(h) => onChange({ ...shadow, h })} className="h-8 w-16" />
             <NumberField value={shadow.v} onChange={(v) => onChange({ ...shadow, v })} className="h-8 w-16" />
             <ColorPicker value={shadow.color} onChange={(color) => onChange({ ...shadow, color })} />
           </Row>
           <SliderRow
-            label="模糊"
+            label="panel.blur"
             value={shadow.blur}
             min={0}
             max={40}
@@ -615,11 +633,12 @@ function OutlineControls({
     outline: { style: "solid" | "dashed" | "dotted"; width: number; color: string } | undefined,
   ) => void
 }) {
+  const t = useT()
   const style = outline?.style ?? "solid"
   const color = outline?.color ?? "#111827"
   return (
     <>
-      <Row label="边框">
+      <Row label="panel.border">
         <ColorPicker
           value={color}
           onChange={(next) => {
@@ -642,14 +661,14 @@ function OutlineControls({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="solid">实线</SelectItem>
-            <SelectItem value="dashed">虚线</SelectItem>
-            <SelectItem value="dotted">点线</SelectItem>
+            <SelectItem value="solid">{t("panel.styleSolid")}</SelectItem>
+            <SelectItem value="dashed">{t("panel.styleDashed")}</SelectItem>
+            <SelectItem value="dotted">{t("panel.styleDotted")}</SelectItem>
           </SelectContent>
         </Select>
       </Row>
       <SliderRow
-        label="边框宽度"
+        label="panel.borderWidth"
         value={outline?.width ?? 0}
         min={0}
         max={20}
@@ -660,6 +679,7 @@ function OutlineControls({
 }
 
 function TextPanel({ el, patch }: { el: TextElement; patch: Patch }) {
+  const t = useT()
   const toggle = (key: "bold" | "italic" | "underline" | "strikethrough") => {
     record()
     patch({ [key]: !el[key] } as Partial<TextElement>)
@@ -680,13 +700,13 @@ function TextPanel({ el, patch }: { el: TextElement; patch: Patch }) {
         <SelectContent>
           {FONT_FAMILIES.map((f) => (
             <SelectItem key={f.value} value={f.value} style={{ fontFamily: f.value }}>
-              {f.label}
+              {f.labelKey ? t(f.labelKey) : f.label}
             </SelectItem>
           ))}
         </SelectContent>
       </Select>
 
-      <Row label="字号 / 颜色">
+      <Row label="panel.sizeAndColour">
         <Select
           value={String(el.fontSize)}
           onValueChange={(v) => {
@@ -714,7 +734,7 @@ function TextPanel({ el, patch }: { el: TextElement; patch: Patch }) {
         />
         <ColorPicker
           value={el.fill ?? "#ffffff"}
-          title="背景填充"
+          title={t("panel.fillBackground")}
           onChange={(fill) => {
             record()
             patch({ fill } as Partial<TextElement>)
@@ -745,7 +765,7 @@ function TextPanel({ el, patch }: { el: TextElement; patch: Patch }) {
 
       <AlignButtons value={el.align} onChange={(align) => patch({ align } as Partial<TextElement>)} />
 
-      <Row label="垂直">
+      <Row label="panel.vertical">
         <Select
           value={el.vertical}
           onValueChange={(v) => {
@@ -757,15 +777,15 @@ function TextPanel({ el, patch }: { el: TextElement; patch: Patch }) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="top">顶部</SelectItem>
-            <SelectItem value="middle">居中</SelectItem>
-            <SelectItem value="bottom">底部</SelectItem>
+            <SelectItem value="top">{t("panel.vTop")}</SelectItem>
+            <SelectItem value="middle">{t("panel.vMiddle")}</SelectItem>
+            <SelectItem value="bottom">{t("panel.vBottom")}</SelectItem>
           </SelectContent>
         </Select>
       </Row>
 
       <SliderRow
-        label="行高"
+        label="panel.lineHeight"
         value={el.lineHeight}
         min={0.8}
         max={3}
@@ -773,21 +793,21 @@ function TextPanel({ el, patch }: { el: TextElement; patch: Patch }) {
         onChange={(lineHeight) => patch({ lineHeight } as Partial<TextElement>)}
       />
       <SliderRow
-        label="字间距"
+        label="panel.letterSpacing"
         value={el.letterSpacing}
         min={-4}
         max={20}
         onChange={(letterSpacing) => patch({ letterSpacing } as Partial<TextElement>)}
       />
       <SliderRow
-        label="段间距"
+        label="panel.paragraphSpacing"
         value={el.paragraphSpacing ?? 0}
         min={0}
         max={40}
         onChange={(paragraphSpacing) => patch({ paragraphSpacing } as Partial<TextElement>)}
       />
       <SliderRow
-        label="内边距"
+        label="panel.padding"
         value={el.padding ?? 8}
         min={0}
         max={40}
@@ -807,11 +827,12 @@ function TextPanel({ el, patch }: { el: TextElement; patch: Patch }) {
 }
 
 function ShapePanel({ el, patch }: { el: ShapeElement; patch: Patch }) {
+  const t = useT()
   const theme = useEditor((s) => s.theme)
   return (
     <div className="space-y-3">
       <SwitchRow
-        label="渐变填充"
+        label="panel.gradientFill"
         checked={!!el.gradient}
         onChange={(on) =>
           patch({
@@ -830,7 +851,7 @@ function ShapePanel({ el, patch }: { el: ShapeElement; patch: Patch }) {
       />
       {el.gradient ? (
         <>
-          <Row label="起止色">
+          <Row label="panel.gradientStops">
             <ColorPicker
               value={el.gradient.stops[0].color}
               onChange={(color) => {
@@ -868,13 +889,13 @@ function ShapePanel({ el, patch }: { el: ShapeElement; patch: Patch }) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="linear">线性</SelectItem>
-                <SelectItem value="radial">径向</SelectItem>
+                <SelectItem value="linear">{t("panel.gradientLinear")}</SelectItem>
+                <SelectItem value="radial">{t("panel.gradientRadial")}</SelectItem>
               </SelectContent>
             </Select>
           </Row>
           <SliderRow
-            label="渐变角度"
+            label="panel.gradientAngle"
             value={el.gradient.rotate}
             min={0}
             max={360}
@@ -884,7 +905,7 @@ function ShapePanel({ el, patch }: { el: ShapeElement; patch: Patch }) {
           />
         </>
       ) : (
-        <Row label="填充">
+        <Row label="panel.fill">
           <ColorPicker
             value={el.fill}
             onChange={(fill) => {
@@ -913,7 +934,7 @@ function ShapePanel({ el, patch }: { el: ShapeElement; patch: Patch }) {
             patch({ flipH: !el.flipH } as Partial<ShapeElement>)
           }}
         >
-          <FlipHorizontal className="size-4" /> 水平
+          <FlipHorizontal className="size-4" /> {t("panel.flipH")}
         </Button>
         <Button
           variant={el.flipV ? "secondary" : "outline"}
@@ -923,13 +944,13 @@ function ShapePanel({ el, patch }: { el: ShapeElement; patch: Patch }) {
             patch({ flipV: !el.flipV } as Partial<ShapeElement>)
           }}
         >
-          <FlipVertical className="size-4" /> 垂直
+          <FlipVertical className="size-4" /> {t("panel.flipV")}
         </Button>
       </div>
 
       <Separator />
-      <p className="text-xs text-muted-foreground">形状文字（双击形状可编辑内容）</p>
-      <Row label="字号 / 颜色">
+      <p className="text-xs text-muted-foreground">{t("panel.shapeTextHint")}</p>
+      <Row label="panel.sizeAndColour">
         <Select
           value={String(el.text.fontSize)}
           onValueChange={(v) => {
@@ -968,14 +989,15 @@ function ShapePanel({ el, patch }: { el: ShapeElement; patch: Patch }) {
   )
 }
 
-const CROP_PRESETS: { label: string; ratio: number | null }[] = [
-  { label: "还原", ratio: null },
-  { label: "1:1", ratio: 1 },
-  { label: "4:3", ratio: 4 / 3 },
-  { label: "16:9", ratio: 16 / 9 },
+const CROP_PRESETS: { key: string; labelKey?: MessageKey; ratio: number | null }[] = [
+  { key: "reset", labelKey: "panel.cropReset", ratio: null },
+  { key: "1:1", ratio: 1 },
+  { key: "4:3", ratio: 4 / 3 },
+  { key: "16:9", ratio: 16 / 9 },
 ]
 
 function ImagePanel({ el, patch }: { el: ImageElement; patch: Patch }) {
+  const t = useT()
   const setFilter = (key: keyof ImageElement["filter"], value: number) =>
     patch({ filter: { ...el.filter, [key]: value } } as Partial<ImageElement>)
 
@@ -1019,7 +1041,7 @@ function ImagePanel({ el, patch }: { el: ImageElement; patch: Patch }) {
             patch({ flipH: !el.flipH } as Partial<ImageElement>)
           }}
         >
-          <FlipHorizontal className="size-4" /> 水平翻转
+          <FlipHorizontal className="size-4" /> {t("panel.flipHorizontal")}
         </Button>
         <Button
           variant={el.flipV ? "secondary" : "outline"}
@@ -1029,27 +1051,27 @@ function ImagePanel({ el, patch }: { el: ImageElement; patch: Patch }) {
             patch({ flipV: !el.flipV } as Partial<ImageElement>)
           }}
         >
-          <FlipVertical className="size-4" /> 垂直
+          <FlipVertical className="size-4" /> {t("panel.flipV")}
         </Button>
       </div>
 
-      <Row label="裁剪">
+      <Row label="panel.crop">
         <div className="flex flex-wrap gap-1">
           {CROP_PRESETS.map((preset) => (
             <Button
-              key={preset.label}
+              key={preset.key}
               variant="outline"
               size="sm"
               className="h-7 px-2 text-xs"
               onClick={() => cropTo(preset.ratio)}
             >
-              {preset.label}
+              {preset.labelKey ? t(preset.labelKey) : preset.key}
             </Button>
           ))}
         </div>
       </Row>
 
-      <Row label="替换图片">
+      <Row label="panel.replaceImage">
         <Input
           type="file"
           accept="image/*"
@@ -1068,7 +1090,7 @@ function ImagePanel({ el, patch }: { el: ImageElement; patch: Patch }) {
         />
       </Row>
 
-      <Row label="着色">
+      <Row label="panel.tint">
         <ColorPicker
           value={el.colorMask ?? "#2563eb"}
           onChange={(colorMask) => {
@@ -1085,23 +1107,23 @@ function ImagePanel({ el, patch }: { el: ImageElement; patch: Patch }) {
             patch({ colorMask: undefined } as Partial<ImageElement>)
           }}
         >
-          清除
+          {t("panel.clear")}
         </Button>
       </Row>
 
       <SliderRow
-        label="圆角"
+        label="panel.radius"
         value={el.radius}
         min={0}
         max={200}
         onChange={(radius) => patch({ radius } as Partial<ImageElement>)}
       />
       <Separator />
-      <SliderRow label="亮度" value={el.filter.brightness} min={0} max={200} onChange={(v) => setFilter("brightness", v)} />
-      <SliderRow label="对比度" value={el.filter.contrast} min={0} max={200} onChange={(v) => setFilter("contrast", v)} />
-      <SliderRow label="饱和度" value={el.filter.saturate} min={0} max={200} onChange={(v) => setFilter("saturate", v)} />
-      <SliderRow label="灰度" value={el.filter.grayscale} min={0} max={100} onChange={(v) => setFilter("grayscale", v)} />
-      <SliderRow label="模糊" value={el.filter.blur} min={0} max={20} onChange={(v) => setFilter("blur", v)} />
+      <SliderRow label="panel.brightness" value={el.filter.brightness} min={0} max={200} onChange={(v) => setFilter("brightness", v)} />
+      <SliderRow label="panel.contrast" value={el.filter.contrast} min={0} max={200} onChange={(v) => setFilter("contrast", v)} />
+      <SliderRow label="panel.saturation" value={el.filter.saturate} min={0} max={200} onChange={(v) => setFilter("saturate", v)} />
+      <SliderRow label="panel.grayscale" value={el.filter.grayscale} min={0} max={100} onChange={(v) => setFilter("grayscale", v)} />
+      <SliderRow label="panel.blur" value={el.filter.blur} min={0} max={20} onChange={(v) => setFilter("blur", v)} />
       <Separator />
       <OutlineControls
         outline={el.outline}
@@ -1116,9 +1138,10 @@ function ImagePanel({ el, patch }: { el: ImageElement; patch: Patch }) {
 }
 
 function LinePanel({ el, patch }: { el: LineElement; patch: Patch }) {
+  const t = useT()
   return (
     <div className="space-y-3">
-      <Row label="颜色">
+      <Row label="panel.color">
         <ColorPicker
           value={el.color}
           onChange={(color) => {
@@ -1127,7 +1150,7 @@ function LinePanel({ el, patch }: { el: LineElement; patch: Patch }) {
           }}
         />
       </Row>
-      <Row label="线型">
+      <Row label="panel.lineStyle">
         <Select
           value={el.style}
           onValueChange={(style) => {
@@ -1139,14 +1162,14 @@ function LinePanel({ el, patch }: { el: LineElement; patch: Patch }) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="solid">实线</SelectItem>
-            <SelectItem value="dashed">虚线</SelectItem>
-            <SelectItem value="dotted">点线</SelectItem>
+            <SelectItem value="solid">{t("panel.styleSolid")}</SelectItem>
+            <SelectItem value="dashed">{t("panel.styleDashed")}</SelectItem>
+            <SelectItem value="dotted">{t("panel.styleDotted")}</SelectItem>
           </SelectContent>
         </Select>
       </Row>
       <SwitchRow
-        label="曲线"
+        label="panel.curve"
         checked={!!el.curve}
         onChange={(on) =>
           patch({
@@ -1160,13 +1183,13 @@ function LinePanel({ el, patch }: { el: LineElement; patch: Patch }) {
         }
       />
       <SliderRow
-        label="粗细"
+        label="panel.thickness"
         value={el.strokeWidth}
         min={1}
         max={30}
         onChange={(strokeWidth) => patch({ strokeWidth } as Partial<LineElement>)}
       />
-      <Row label="端点">
+      <Row label="panel.endpoints">
         <Select
           value={el.startCap}
           onValueChange={(startCap) => {
@@ -1178,9 +1201,9 @@ function LinePanel({ el, patch }: { el: LineElement; patch: Patch }) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="none">无</SelectItem>
-            <SelectItem value="arrow">箭头</SelectItem>
-            <SelectItem value="dot">圆点</SelectItem>
+            <SelectItem value="none">{t("panel.capNone")}</SelectItem>
+            <SelectItem value="arrow">{t("panel.capArrow")}</SelectItem>
+            <SelectItem value="dot">{t("panel.capDot")}</SelectItem>
           </SelectContent>
         </Select>
         <Select
@@ -1194,9 +1217,9 @@ function LinePanel({ el, patch }: { el: LineElement; patch: Patch }) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="none">无</SelectItem>
-            <SelectItem value="arrow">箭头</SelectItem>
-            <SelectItem value="dot">圆点</SelectItem>
+            <SelectItem value="none">{t("panel.capNone")}</SelectItem>
+            <SelectItem value="arrow">{t("panel.capArrow")}</SelectItem>
+            <SelectItem value="dot">{t("panel.capDot")}</SelectItem>
           </SelectContent>
         </Select>
       </Row>
@@ -1205,33 +1228,34 @@ function LinePanel({ el, patch }: { el: LineElement; patch: Patch }) {
 }
 
 function TablePanel({ el, patch }: { el: TableElement; patch: Patch }) {
+  const t = useT()
   const store = useEditor.getState
   return (
     <div className="space-y-3">
-      <p className="text-xs text-muted-foreground">双击表格进入编辑，拖选多格后可合并</p>
+      <p className="text-xs text-muted-foreground">{t("panel.tableHint")}</p>
       <div className="grid grid-cols-2 gap-1.5">
         <Button variant="outline" size="sm" className="text-xs" onClick={() => store().addTableRow()}>
-          <Rows3 className="size-4" /> 插入行
+          <Rows3 className="size-4" /> {t("panel.insertRow")}
         </Button>
         <Button variant="outline" size="sm" className="text-xs" onClick={() => store().addTableColumn()}>
-          <Columns3 className="size-4" /> 插入列
+          <Columns3 className="size-4" /> {t("panel.insertColumn")}
         </Button>
         <Button variant="outline" size="sm" className="text-xs" onClick={() => store().removeTableRow()}>
-          <Trash2 className="size-4" /> 删除行
+          <Trash2 className="size-4" /> {t("panel.deleteRow")}
         </Button>
         <Button variant="outline" size="sm" className="text-xs" onClick={() => store().removeTableColumn()}>
-          <Trash2 className="size-4" /> 删除列
+          <Trash2 className="size-4" /> {t("panel.deleteColumn")}
         </Button>
         <Button variant="outline" size="sm" className="text-xs" onClick={() => store().mergeTableCells()}>
-          <Combine className="size-4" /> 合并
+          <Combine className="size-4" /> {t("panel.mergeCells")}
         </Button>
         <Button variant="outline" size="sm" className="text-xs" onClick={() => store().splitTableCell()}>
-          <Split className="size-4" /> 拆分
+          <Split className="size-4" /> {t("panel.splitCell")}
         </Button>
       </div>
 
       <Separator />
-      <Row label="主题色">
+      <Row label="panel.themeColor">
         <ColorPicker
           value={el.theme.color}
           onChange={(color) => {
@@ -1241,16 +1265,16 @@ function TablePanel({ el, patch }: { el: TableElement; patch: Patch }) {
         />
       </Row>
       <SwitchRow
-        label="标题行"
+        label="panel.headerRow"
         checked={el.theme.rowHeader}
         onChange={(rowHeader) => patch({ theme: { ...el.theme, rowHeader } } as Partial<TableElement>)}
       />
       <SwitchRow
-        label="隔行变色"
+        label="panel.bandedRows"
         checked={el.theme.banded}
         onChange={(banded) => patch({ theme: { ...el.theme, banded } } as Partial<TableElement>)}
       />
-      <Row label="字号">
+      <Row label="panel.fontSize">
         <Select
           value={String(el.fontSize)}
           onValueChange={(v) => {
@@ -1283,11 +1307,12 @@ function TablePanel({ el, patch }: { el: TableElement; patch: Patch }) {
 }
 
 function ChartPanel({ el, patch }: { el: ChartElement; patch: Patch }) {
+  const t = useT()
   const [text, setText] = useState(() => serializeChart(el))
 
   return (
     <div className="space-y-3">
-      <Row label="图表类型">
+      <Row label="panel.chartType">
         <Select
           value={el.chartType}
           onValueChange={(chartType) => {
@@ -1299,9 +1324,9 @@ function ChartPanel({ el, patch }: { el: ChartElement; patch: Patch }) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {CHART_TYPES.map((t) => (
-              <SelectItem key={t.value} value={t.value}>
-                {t.label}
+            {CHART_TYPES.map((chart) => (
+              <SelectItem key={chart.value} value={chart.value}>
+                {t(chart.labelKey)}
               </SelectItem>
             ))}
           </SelectContent>
@@ -1310,7 +1335,7 @@ function ChartPanel({ el, patch }: { el: ChartElement; patch: Patch }) {
 
       <div className="space-y-1.5">
         <Label className="text-xs font-normal text-muted-foreground">
-          数据（首行为系列名，首列为分类）
+          {t("panel.chartData")}
         </Label>
         <textarea
           value={text}
@@ -1328,21 +1353,21 @@ function ChartPanel({ el, patch }: { el: ChartElement; patch: Patch }) {
       </div>
 
       <SwitchRow
-        label="图例"
+        label="panel.legend"
         checked={el.showLegend}
         onChange={(showLegend) => patch({ showLegend } as Partial<ChartElement>)}
       />
       <SwitchRow
-        label="网格线"
+        label="panel.gridLines"
         checked={el.showGrid}
         onChange={(showGrid) => patch({ showGrid } as Partial<ChartElement>)}
       />
       <SwitchRow
-        label="数值标签"
+        label="panel.valueLabels"
         checked={el.showValue}
         onChange={(showValue) => patch({ showValue } as Partial<ChartElement>)}
       />
-      <Row label="文字 / 网格">
+      <Row label="panel.textAndGrid">
         <ColorPicker
           value={el.textColor}
           onChange={(textColor) => {
@@ -1359,7 +1384,7 @@ function ChartPanel({ el, patch }: { el: ChartElement; patch: Patch }) {
         />
       </Row>
       <div className="space-y-1.5">
-        <Label className="text-xs font-normal text-muted-foreground">系列配色</Label>
+        <Label className="text-xs font-normal text-muted-foreground">{t("panel.seriesColours")}</Label>
         <div className="flex flex-wrap gap-1.5">
           {el.themeColors.map((color, i) => (
             <ColorPicker
@@ -1415,12 +1440,13 @@ function parseChart(text: string): ChartElement["data"] | null {
 }
 
 function MediaPanel({ el, patch }: { el: MediaElement; patch: Patch }) {
+  const t = useT()
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">
-        编辑时显示为静帧，放映时才会播放
+        {t("panel.mediaHint")}
       </p>
-      <Row label="替换文件">
+      <Row label="panel.replaceFile">
         <Input
           type="file"
           accept={el.type === "video" ? "video/*" : "audio/*"}
@@ -1440,7 +1466,7 @@ function MediaPanel({ el, patch }: { el: MediaElement; patch: Patch }) {
       </Row>
 
       {el.type === "video" && (
-        <Row label="封面图">
+        <Row label="panel.posterImage">
           <Input
             type="file"
             accept="image/*"
@@ -1461,12 +1487,12 @@ function MediaPanel({ el, patch }: { el: MediaElement; patch: Patch }) {
       )}
 
       <SwitchRow
-        label="自动播放"
+        label="panel.autoplay"
         checked={el.autoplay}
         onChange={(autoplay) => patch({ autoplay } as Partial<MediaElement>)}
       />
       <SwitchRow
-        label="循环播放"
+        label="panel.loop"
         checked={el.loop}
         onChange={(loop) => patch({ loop } as Partial<MediaElement>)}
       />
@@ -1474,16 +1500,17 @@ function MediaPanel({ el, patch }: { el: MediaElement; patch: Patch }) {
   )
 }
 
-const FORMULA_SAMPLES = [
-  { label: "分式", latex: "\\frac{a}{b}" },
-  { label: "根式", latex: "\\sqrt{x^2 + y^2}" },
-  { label: "求和", latex: "\\sum_{i=1}^{n} i" },
-  { label: "积分", latex: "\\int_{0}^{\\infty} e^{-x} dx" },
-  { label: "矩阵", latex: "\\begin{matrix} a & b \\\\ c & d \\end{matrix}" },
-  { label: "极限", latex: "\\lim_{x \\to 0} \\frac{\\sin x}{x}" },
+const FORMULA_SAMPLES: { labelKey: MessageKey; latex: string }[] = [
+  { labelKey: "formula.fraction", latex: "\\frac{a}{b}" },
+  { labelKey: "formula.root", latex: "\\sqrt{x^2 + y^2}" },
+  { labelKey: "formula.sum", latex: "\\sum_{i=1}^{n} i" },
+  { labelKey: "formula.integral", latex: "\\int_{0}^{\\infty} e^{-x} dx" },
+  { labelKey: "formula.matrix", latex: "\\begin{matrix} a & b \\\\ c & d \\end{matrix}" },
+  { labelKey: "formula.limit", latex: "\\lim_{x \\to 0} \\frac{\\sin x}{x}" },
 ]
 
 function FormulaPanel({ el, patch }: { el: FormulaElement; patch: Patch }) {
+  const t = useT()
   const [draft, setDraft] = useState(el.latex)
 
   return (
@@ -1507,7 +1534,7 @@ function FormulaPanel({ el, patch }: { el: FormulaElement; patch: Patch }) {
       <div className="flex flex-wrap gap-1">
         {FORMULA_SAMPLES.map((sample) => (
           <Button
-            key={sample.label}
+            key={sample.labelKey}
             variant="outline"
             size="sm"
             className="h-7 px-2 text-xs"
@@ -1517,12 +1544,12 @@ function FormulaPanel({ el, patch }: { el: FormulaElement; patch: Patch }) {
               patch({ latex: sample.latex } as Partial<FormulaElement>)
             }}
           >
-            {sample.label}
+            {t(sample.labelKey)}
           </Button>
         ))}
       </div>
 
-      <Row label="颜色">
+      <Row label="panel.color">
         <ColorPicker
           value={el.color}
           onChange={(color) => {
@@ -1532,13 +1559,14 @@ function FormulaPanel({ el, patch }: { el: FormulaElement; patch: Patch }) {
         />
       </Row>
       <p className="text-[11px] text-muted-foreground">
-        导出 PPTX 时公式会转成图片——PowerPoint 的公式是 OMML，和 LaTeX 不是一回事
+        {t("panel.formulaNote")}
       </p>
     </div>
   )
 }
 
 function AnimationPanel() {
+  const t = useT()
   const slides = useEditor((s) => s.slides)
   const slideIndex = useEditor((s) => s.slideIndex)
   const activeIds = useEditor((s) => s.activeIds)
@@ -1547,13 +1575,15 @@ function AnimationPanel() {
 
   const labelFor = (elId: string) => {
     const index = slide.elements.findIndex((el) => el.id === elId)
-    return index < 0 ? "已删除" : `元素 ${index + 1}`
+    return index < 0 ? t("element.deleted") : t("element.indexed", { n: index + 1 })
   }
 
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">
-        {activeIds.length === 1 ? "为选中元素添加动画" : "先在画布上选中一个元素"}
+        {activeIds.length === 1
+          ? t("panel.animationHintOne")
+          : t("panel.animationHintNone")}
       </p>
 
       <Select
@@ -1572,12 +1602,12 @@ function AnimationPanel() {
         }}
       >
         <SelectTrigger className="h-8 w-full">
-          <SelectValue placeholder="添加动画…" />
+          <SelectValue placeholder={t("panel.addAnimation")} />
         </SelectTrigger>
         <SelectContent>
           {ANIMATIONS.map((a) => (
             <SelectItem key={a.value} value={a.value}>
-              {a.label}
+              {t(a.labelKey)}
             </SelectItem>
           ))}
         </SelectContent>
@@ -1585,7 +1615,7 @@ function AnimationPanel() {
 
       {!animations.length && (
         <p className="rounded-md border border-dashed p-3 text-center text-xs text-muted-foreground">
-          本页还没有动画
+          {t("panel.noAnimations")}
         </p>
       )}
 
@@ -1594,7 +1624,11 @@ function AnimationPanel() {
           <li key={animation.id} className="space-y-1.5 rounded-md border p-2">
             <div className="flex items-center justify-between gap-2">
               <span className="truncate text-xs font-medium">
-                {index + 1}. {ANIMATIONS.find((a) => a.value === animation.effect)?.label}
+                {index + 1}.{" "}
+                {(() => {
+                  const preset = ANIMATIONS.find((a) => a.value === animation.effect)
+                  return preset ? t(preset.labelKey) : animation.effect
+                })()}
               </span>
               <div className="flex shrink-0 items-center gap-1">
                 <button
@@ -1633,8 +1667,8 @@ function AnimationPanel() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="click">单击时</SelectItem>
-                  <SelectItem value="auto">与上一动画同时</SelectItem>
+                  <SelectItem value="click">{t("panel.triggerClick")}</SelectItem>
+                  <SelectItem value="auto">{t("panel.triggerAuto")}</SelectItem>
                 </SelectContent>
               </Select>
               <Input

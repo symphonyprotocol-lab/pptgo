@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import JSZip from "jszip"
-import { buildPptx, tint } from "./export"
+import { buildPptx } from "./export"
+import { tint } from "./table-theme"
 import {
   createChartElement,
   createDeck,

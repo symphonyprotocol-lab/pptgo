@@ -3,6 +3,7 @@ import { Fraunces, Geist, Geist_Mono } from "next/font/google";
 import { DEFAULT_THEME_PREF, THEME_INIT_SCRIPT } from "@/lib/theme";
 import { I18nProvider } from "@/lib/i18n/client";
 import { getLocale } from "@/lib/i18n/server";
+import { headers } from "next/headers";
 import { translator } from "@/lib/i18n/translate";
 import "./globals.css";
 
@@ -41,6 +42,8 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   const locale = await getLocale();
+  // minted per request by the middleware; without it the CSP blocks the boot script below
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
 
   return (
     // The theme is a client fact — system preference plus whatever the user last chose
@@ -55,7 +58,17 @@ export default async function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} ${fraunces.variable} h-full antialiased`}
     >
       <head>
-        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+        {/*
+          React deliberately drops `nonce` from the client tree so no script can read it
+          back, which makes the attribute a guaranteed hydration mismatch. It is the same
+          reason `<html>` above carries one: the server value is the correct one and the
+          client must not "fix" it.
+        */}
+        <script
+          nonce={nonce}
+          suppressHydrationWarning
+          dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }}
+        />
       </head>
       <body className="grain min-h-full flex flex-col">
         <I18nProvider locale={locale}>{children}</I18nProvider>

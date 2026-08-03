@@ -1,9 +1,11 @@
 import { redirect } from "next/navigation"
 import { currentUser } from "@/auth"
 import { EditorClient } from "../editor-client"
+import { getLocale } from "@/lib/i18n/server"
+import { translator } from "@/lib/i18n/translate"
 
-export const metadata = {
-  title: "PPTGo 编辑器",
+export async function generateMetadata() {
+  return { title: translator(await getLocale())("editor.metaTitle") }
 }
 
 export default async function CloudEditorPage({

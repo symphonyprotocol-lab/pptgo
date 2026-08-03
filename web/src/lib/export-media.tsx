@@ -5,6 +5,7 @@ import { createRoot } from "react-dom/client"
 import { SlideView } from "@/components/editor/slide-view"
 import { VIEWPORT_HEIGHT, VIEWPORT_WIDTH } from "./constants"
 import { triggerDownload } from "./export"
+import { fallbackTranslate, type Translate } from "./i18n/translate"
 import type { Deck, Slide } from "@/types/slides"
 
 /**
@@ -54,13 +55,13 @@ export async function slideToBlob(slide: Slide, scale: number): Promise<Blob | n
 }
 
 /** One PNG per slide, zipped when there is more than one. */
-export async function exportImages(deck: Deck, scale = 2) {
+export async function exportImages(deck: Deck, t: Translate = fallbackTranslate, scale = 2) {
   const blobs: { name: string; blob: Blob }[] = []
   for (const [index, slide] of deck.slides.entries()) {
     const blob = await slideToBlob(slide, scale)
     if (blob) blobs.push({ name: `${String(index + 1).padStart(2, "0")}.png`, blob })
   }
-  if (!blobs.length) throw new Error("没有可导出的幻灯片")
+  if (!blobs.length) throw new Error(t("error.noSlides"))
 
   const base = deck.title || "deck"
   if (blobs.length === 1) {

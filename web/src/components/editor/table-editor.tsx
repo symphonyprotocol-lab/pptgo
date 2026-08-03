@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import { useEditor } from "@/store/editor"
+import { useT } from "@/lib/i18n/client"
 import type { TableCell, TableElement } from "@/types/slides"
 import { cellStyle } from "./table-view"
 
@@ -10,6 +11,7 @@ import { cellStyle } from "./table-view"
  * selected range drives the merge/split controls in the property panel.
  */
 export function TableEditor({ element, scale }: { element: TableElement; scale: number }) {
+  const t = useT()
   const ref = useRef<HTMLDivElement>(null)
   const [anchor, setAnchor] = useState<[number, number] | null>(null)
   const selection = useEditor((s) => s.tableSelection)
@@ -134,7 +136,7 @@ export function TableEditor({ element, scale }: { element: TableElement; scale: 
         className="absolute left-0 whitespace-nowrap rounded bg-slate-900/80 px-2 py-1 text-white"
         style={{ bottom: -26 / scale, fontSize: 11 / scale }}
       >
-        点击单元格输入，拖选多格后可在右侧合并
+        {t("panel.tableEditHint")}
       </div>
     </div>
   )

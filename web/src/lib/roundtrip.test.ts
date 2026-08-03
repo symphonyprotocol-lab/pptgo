@@ -12,6 +12,7 @@ import {
   createTextElement,
 } from "./factory"
 import { htmlToPlainText } from "./sanitize"
+import { translator } from "./i18n/translate"
 import type { ChartElement, Deck, ShapeElement, TableElement } from "@/types/slides"
 
 /** Export to a real .pptx, then read it back through the importer. */
@@ -22,9 +23,16 @@ async function roundTrip(deck: Deck): Promise<Deck> {
   return normalizeDeck(await importPptx(new File([buffer], "round.pptx")))
 }
 
+/**
+ * The sample deck in Chinese. The factories are language-free now, so a test that wants
+ * CJK text — and this one does; the whole `a:ea` font path only fires on it — has to ask
+ * for it rather than rely on whatever the default happens to be.
+ */
+const zh = translator("zh")
+
 describe("pptx round trip", () => {
   it("keeps the slide count and the text of the starter deck", async () => {
-    const source = createDeck()
+    const source = createDeck(zh)
     const result = await roundTrip(source)
 
     expect(result.slides).toHaveLength(source.slides.length)
@@ -38,13 +46,13 @@ describe("pptx round trip", () => {
             : "",
       )
       .join(" ")
-    expect(text).toContain("PPTGo 在线演示文稿")
-    expect(text).toContain("形状也能写字")
+    expect(text).toContain(zh("deck.sampleTitle"))
+    expect(text).toContain(zh("deck.sampleShape"))
   })
 
   it("keeps a shape's preset geometry and fill", async () => {
     const deck: Deck = {
-      ...createDeck(),
+      ...createDeck(zh),
       slides: [
         createSlide({
           elements: [
@@ -67,7 +75,7 @@ describe("pptx round trip", () => {
 
   it("keeps geometry within a unit of where it started", async () => {
     const deck: Deck = {
-      ...createDeck(),
+      ...createDeck(zh),
       slides: [
         createSlide({
           elements: [createShapeElement("rect", { left: 120, top: 80, width: 300, height: 150 })],
@@ -83,7 +91,7 @@ describe("pptx round trip", () => {
 
   it("keeps partial bold through the whole trip", async () => {
     const deck: Deck = {
-      ...createDeck(),
+      ...createDeck(zh),
       slides: [
         createSlide({ elements: [createTextElement({ content: "plain <b>bold</b> tail" })] }),
       ],
@@ -100,7 +108,7 @@ describe("pptx round trip", () => {
   it("keeps table text and shape", async () => {
     const table = createTableElement(2, 3)
     table.rows[1][0].text = "cell"
-    const deck: Deck = { ...createDeck(), slides: [createSlide({ elements: [table] })] }
+    const deck: Deck = { ...createDeck(zh), slides: [createSlide({ elements: [table] })] }
     const result = (await roundTrip(deck)).slides[0].elements[0] as TableElement
     expect(result.type).toBe("table")
     expect(result.rows).toHaveLength(2)
@@ -119,7 +127,7 @@ describe("pptx round trip", () => {
         ],
       },
     })
-    const deck: Deck = { ...createDeck(), slides: [createSlide({ elements: [chart] })] }
+    const deck: Deck = { ...createDeck(zh), slides: [createSlide({ elements: [chart] })] }
     const result = (await roundTrip(deck)).slides[0].elements[0] as ChartElement
 
     expect(result.type).toBe("chart")
@@ -131,7 +139,7 @@ describe("pptx round trip", () => {
 
   it("keeps a horizontal bar chart horizontal", async () => {
     const deck: Deck = {
-      ...createDeck(),
+      ...createDeck(zh),
       slides: [createSlide({ elements: [createChartElement({ chartType: "bar" })] })],
     }
     expect((await roundTrip(deck)).slides[0].elements[0]).toMatchObject({ chartType: "bar" })
@@ -139,7 +147,7 @@ describe("pptx round trip", () => {
 
   it("keeps a pie chart's single series", async () => {
     const deck: Deck = {
-      ...createDeck(),
+      ...createDeck(zh),
       slides: [
         createSlide({
           elements: [
@@ -158,7 +166,7 @@ describe("pptx round trip", () => {
 
   it("keeps speaker notes", async () => {
     const deck: Deck = {
-      ...createDeck(),
+      ...createDeck(zh),
       slides: [createSlide({ notes: "两行\n备注" })],
     }
     expect((await roundTrip(deck)).slides[0].notes).toContain("备注")

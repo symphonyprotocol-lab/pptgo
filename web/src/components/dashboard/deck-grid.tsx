@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { Copy, Loader2, MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react"
@@ -22,23 +22,27 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { createDeck } from "@/lib/factory"
+import { useI18n } from "@/lib/i18n/client"
+import type { Translate } from "@/lib/i18n/translate"
 import type { DeckSummary } from "@/types/deck"
 
 export function DeckGrid({ initial }: { initial: DeckSummary[] }) {
+  const { t, locale } = useI18n()
   const router = useRouter()
   const [decks, setDecks] = useState(initial)
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [renaming, setRenaming] = useState<DeckSummary | null>(null)
   const [deleting, setDeleting] = useState<DeckSummary | null>(null)
-  const [, startTransition] = useTransition()
 
   async function call<T>(input: string, init: RequestInit): Promise<T | null> {
     const response = await fetch(input, init)
     if (response.status === 204) return null
     const body = await response.json().catch(() => null)
     if (!response.ok) {
-      throw new Error((body as { error?: string })?.error ?? `请求失败（${response.status}）`)
+      throw new Error(
+        (body as { error?: string })?.error ?? t("api.requestFailed", { status: response.status }),
+      )
     }
     return body as T
   }
@@ -52,7 +56,7 @@ export function DeckGrid({ initial }: { initial: DeckSummary[] }) {
       const body = await call<{ deck: DeckSummary }>("/api/decks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ deck: createDeck() }),
+        body: JSON.stringify({ deck: createDeck(t) }),
       })
       if (body) router.push(`/editor/${body.deck.id}`)
     } catch (e) {
@@ -87,7 +91,6 @@ export function DeckGrid({ initial }: { initial: DeckSummary[] }) {
         body: JSON.stringify({ action: "duplicate" }),
       })
       if (body) setDecks((list) => [body.deck, ...list])
-      startTransition(() => router.refresh())
     } catch (e) {
       setError((e as Error).message)
     }
@@ -131,10 +134,10 @@ export function DeckGrid({ initial }: { initial: DeckSummary[] }) {
           </span>
           <span className="px-5 pt-4 pb-5">
             <span className="block text-base font-bold tracking-[-0.02em]">
-              {creating ? "正在创建…" : "新建演示文稿"}
+              {creating ? t("dashboard.creating") : t("dashboard.newDeck")}
             </span>
             <span className="mt-1.5 block font-mono text-[11px] tracking-wider text-muted-foreground">
-              16 : 9 · 空白稿
+              {t("dashboard.blankSpec")}
             </span>
           </span>
         </button>
@@ -143,6 +146,8 @@ export function DeckGrid({ initial }: { initial: DeckSummary[] }) {
           <DeckCard
             key={deck.id}
             deck={deck}
+            t={t}
+            locale={locale}
             onRename={() => setRenaming(deck)}
             onDuplicate={() => onDuplicate(deck)}
             onDelete={() => setDeleting(deck)}
@@ -152,11 +157,12 @@ export function DeckGrid({ initial }: { initial: DeckSummary[] }) {
 
       {!decks.length && (
         <p className="mt-8 font-mono text-xs tracking-wider text-muted-foreground">
-          还没有演示文稿——从上面那块虚线方框开始。
+          {t("dashboard.empty")}
         </p>
       )}
 
       <RenameDialog
+        t={t}
         deck={renaming}
         onClose={() => setRenaming(null)}
         onSubmit={onRename}
@@ -165,20 +171,20 @@ export function DeckGrid({ initial }: { initial: DeckSummary[] }) {
       <Dialog open={Boolean(deleting)} onOpenChange={(open) => !open && setDeleting(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>删除《{deleting?.title}》？</DialogTitle>
-            <DialogDescription>
-              演示文稿正文和缩略图会一并从对象存储里删除，无法撤销。
-            </DialogDescription>
+            <DialogTitle>
+              {t("dashboard.deleteTitle", { title: deleting?.title ?? "" })}
+            </DialogTitle>
+            <DialogDescription>{t("dashboard.deleteHint")}</DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleting(null)}>
-              取消
+              {t("dashboard.cancel")}
             </Button>
             <Button
               variant="destructive"
               onClick={() => deleting && onDelete(deleting)}
             >
-              删除
+              {t("dashboard.delete")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -189,11 +195,15 @@ export function DeckGrid({ initial }: { initial: DeckSummary[] }) {
 
 function DeckCard({
   deck,
+  t,
+  locale,
   onRename,
   onDuplicate,
   onDelete,
 }: {
   deck: DeckSummary
+  t: Translate
+  locale: string
   onRename: () => void
   onDuplicate: () => void
   onDelete: () => void
@@ -213,7 +223,7 @@ function DeckCard({
           ) : (
             <div className="flex size-full items-center justify-center bg-muted">
               <span className="font-mono text-[10px] tracking-[0.24em] text-muted-foreground uppercase">
-                no preview
+                {t("dashboard.noPreview")}
               </span>
             </div>
           )}
@@ -228,7 +238,11 @@ function DeckCard({
             suppressHydrationWarning
             className="mt-1.5 font-mono text-[11px] tracking-wider text-muted-foreground"
           >
-            {deck.slideCount} 页 · {formatSize(deck.byteSize)} · {formatTime(deck.updatedAt)}
+{t("dashboard.deckMeta", {
+              slides: deck.slideCount,
+              size: formatSize(deck.byteSize),
+              time: formatTime(deck.updatedAt, t, locale),
+            })}
           </p>
         </div>
       </Link>
@@ -236,7 +250,7 @@ function DeckCard({
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button
-            aria-label="更多操作"
+            aria-label={t("dashboard.moreActions")}
             className="absolute right-3 bottom-4 grid size-8 place-items-center text-muted-foreground transition-colors hover:bg-foreground hover:text-background"
           >
             <MoreHorizontal className="size-4" />
@@ -245,16 +259,16 @@ function DeckCard({
         <DropdownMenuContent align="end">
           <DropdownMenuItem onSelect={onRename}>
             <Pencil className="size-4" />
-            重命名
+            {t("dashboard.rename")}
           </DropdownMenuItem>
           <DropdownMenuItem onSelect={onDuplicate}>
             <Copy className="size-4" />
-            创建副本
+            {t("dashboard.duplicate")}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem variant="destructive" onSelect={onDelete}>
             <Trash2 className="size-4" />
-            删除
+            {t("dashboard.delete")}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -263,10 +277,12 @@ function DeckCard({
 }
 
 function RenameDialog({
+  t,
   deck,
   onClose,
   onSubmit,
 }: {
+  t: Translate
   deck: DeckSummary | null
   onClose: () => void
   onSubmit: (deck: DeckSummary, title: string) => void
@@ -275,12 +291,12 @@ function RenameDialog({
     <Dialog open={Boolean(deck)} onOpenChange={(open) => !open && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>重命名演示文稿</DialogTitle>
-          <DialogDescription>标题同时会写进演示文稿本身。</DialogDescription>
+          <DialogTitle>{t("dashboard.renameTitle")}</DialogTitle>
+          <DialogDescription>{t("dashboard.renameHint")}</DialogDescription>
         </DialogHeader>
         {/* keyed on the deck so the field is seeded by mount rather than by an effect */}
         {deck && (
-          <RenameForm key={deck.id} deck={deck} onClose={onClose} onSubmit={onSubmit} />
+          <RenameForm key={deck.id} t={t} deck={deck} onClose={onClose} onSubmit={onSubmit} />
         )}
       </DialogContent>
     </Dialog>
@@ -288,10 +304,12 @@ function RenameDialog({
 }
 
 function RenameForm({
+  t,
   deck,
   onClose,
   onSubmit,
 }: {
+  t: Translate
   deck: DeckSummary
   onClose: () => void
   onSubmit: (deck: DeckSummary, title: string) => void
@@ -315,10 +333,10 @@ function RenameForm({
       />
       <DialogFooter>
         <Button type="button" variant="outline" onClick={onClose}>
-          取消
+          {t("dashboard.cancel")}
         </Button>
         <Button type="submit" disabled={!title.trim()}>
-          保存
+          {t("dashboard.save")}
         </Button>
       </DialogFooter>
     </form>
@@ -334,13 +352,16 @@ function formatSize(bytes: number): string {
 /**
  * Rendered on the server too, where "now" and the timezone differ from the browser's —
  * hence `suppressHydrationWarning` on the element that shows it.
+ *
+ * The absolute fallback is formatted for the reader's locale rather than always zh-CN,
+ * which put `2026/3/14` in front of readers who write it the other way round.
  */
-function formatTime(iso: string): string {
+function formatTime(iso: string, t: Translate, locale: string): string {
   const then = new Date(iso)
   const minutes = Math.round((Date.now() - then.getTime()) / 60_000)
-  if (minutes < 1) return "刚刚"
-  if (minutes < 60) return `${minutes} 分钟前`
-  if (minutes < 60 * 24) return `${Math.floor(minutes / 60)} 小时前`
-  if (minutes < 60 * 24 * 7) return `${Math.floor(minutes / 60 / 24)} 天前`
-  return then.toLocaleDateString("zh-CN")
+  if (minutes < 1) return t("time.justNow")
+  if (minutes < 60) return t("time.minutes", { n: minutes })
+  if (minutes < 60 * 24) return t("time.hours", { n: Math.floor(minutes / 60) })
+  if (minutes < 60 * 24 * 7) return t("time.days", { n: Math.floor(minutes / 60 / 24) })
+  return then.toLocaleDateString(locale === "zh" ? "zh-CN" : "en-GB")
 }

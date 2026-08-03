@@ -3,6 +3,7 @@
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { PRESET_COLORS } from "@/lib/constants"
 import { cn } from "@/lib/utils"
+import { useT } from "@/lib/i18n/client"
 
 interface Props {
   value?: string
@@ -12,9 +13,12 @@ interface Props {
 }
 
 export function ColorPicker({ value = "#000000", onChange, className, title }: Props) {
+  const t = useT()
   // the swatch's only content is its own background, so the colour has to be spoken;
-  // callers that pass a title get "填充：#2563eb" rather than a bare hex
-  const label = title ? `${title}：${value}` : `颜色 ${value}`
+  // callers that pass a title get "Fill: #2563eb" rather than a bare hex
+  const label = title
+    ? t("panel.colourNamed", { name: title, value })
+    : t("panel.colourPlain", { value })
 
   return (
     <Popover>
@@ -45,7 +49,7 @@ export function ColorPicker({ value = "#000000", onChange, className, title }: P
           ))}
         </div>
         <label className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
-          自定义
+          {t("panel.customColour")}
           <input
             type="color"
             value={value.startsWith("#") ? value : "#000000"}

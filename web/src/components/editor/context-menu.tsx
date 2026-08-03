@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react"
 import { useEditor } from "@/store/editor"
+import { useT } from "@/lib/i18n/client"
 
 interface Item {
   label: string
@@ -21,6 +22,7 @@ export function CanvasContextMenu({
   y: number
   onClose: () => void
 }) {
+  const t = useT()
   const ref = useRef<HTMLDivElement>(null)
   const activeIds = useEditor((s) => s.activeIds)
   const clipboard = useEditor((s) => s.clipboard)
@@ -48,11 +50,16 @@ export function CanvasContextMenu({
 
   const groups: Item[][] = [
     [
-      { label: "复制", shortcut: "⌘C", disabled: !has, run: () => store().copy() },
-      { label: "剪切", shortcut: "⌘X", disabled: !has, run: () => store().cut() },
-      { label: "粘贴", shortcut: "⌘V", disabled: !clipboard?.length, run: () => store().paste() },
+      { label: t("menu.copy"), shortcut: "⌘C", disabled: !has, run: () => store().copy() },
+      { label: t("menu.cut"), shortcut: "⌘X", disabled: !has, run: () => store().cut() },
       {
-        label: "创建副本",
+        label: t("menu.paste"),
+        shortcut: "⌘V",
+        disabled: !clipboard?.length,
+        run: () => store().paste(),
+      },
+      {
+        label: t("menu.duplicate"),
         shortcut: "⌘D",
         disabled: !has,
         run: () => {
@@ -62,35 +69,51 @@ export function CanvasContextMenu({
       },
     ],
     [
-      { label: "置于顶层", disabled: !has, run: () => store().reorder(activeIds, "front") },
-      { label: "置于底层", disabled: !has, run: () => store().reorder(activeIds, "back") },
-      { label: "上移一层", disabled: !has, run: () => store().reorder(activeIds, "forward") },
-      { label: "下移一层", disabled: !has, run: () => store().reorder(activeIds, "backward") },
+      {
+        label: t("editor.bringToFront"),
+        disabled: !has,
+        run: () => store().reorder(activeIds, "front"),
+      },
+      {
+        label: t("editor.sendToBack"),
+        disabled: !has,
+        run: () => store().reorder(activeIds, "back"),
+      },
+      {
+        label: t("editor.bringForward"),
+        disabled: !has,
+        run: () => store().reorder(activeIds, "forward"),
+      },
+      {
+        label: t("editor.sendBackward"),
+        disabled: !has,
+        run: () => store().reorder(activeIds, "backward"),
+      },
     ],
     [
       {
-        label: "组合",
+        label: t("editor.group"),
         shortcut: "⌘G",
         disabled: activeIds.length < 2,
         run: () => store().groupElements(),
       },
       {
-        label: "取消组合",
+        label: t("editor.ungroup"),
         shortcut: "⌘⇧G",
         disabled: !selected.some((el) => el.groupId),
         run: () => store().ungroupElements(),
       },
       {
-        label: locked ? "解锁" : "锁定",
+        label: locked ? t("menu.unlock") : t("menu.lock"),
         disabled: !has,
         run: () => store().toggleLock(activeIds, !locked),
       },
     ],
     [
-      { label: "新建幻灯片", run: () => store().addSlide() },
-      { label: "全选", shortcut: "⌘A", run: () => store().setActiveIds(slide.elements.filter((el) => !el.lock).map((el) => el.id)) },
+      { label: t("editor.newSlide"), run: () => store().addSlide() },
+      { label: t("menu.selectAll"), shortcut: "⌘A", run: () => store().setActiveIds(slide.elements.filter((el) => !el.lock).map((el) => el.id)) },
       {
-        label: "删除",
+        label: t("dashboard.delete"),
         shortcut: "Del",
         disabled: !has,
         danger: true,

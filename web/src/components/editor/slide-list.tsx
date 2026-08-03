@@ -12,9 +12,11 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { useEditor } from "@/store/editor"
+import { useT } from "@/lib/i18n/client"
 import { SlideThumbnail } from "./slide-view"
 
 export function SlideList({ className }: { className?: string } = {}) {
+  const t = useT()
   const slides = useEditor((s) => s.slides)
   const slideIndex = useEditor((s) => s.slideIndex)
   const [dragIndex, setDragIndex] = useState<number | null>(null)
@@ -24,14 +26,14 @@ export function SlideList({ className }: { className?: string } = {}) {
     <aside className={cn("flex w-52 shrink-0 flex-col border-r bg-background", className)}>
       <div className="flex items-center justify-between border-b px-3 py-2">
         <span className="text-xs font-medium text-muted-foreground">
-          幻灯片 {slideIndex + 1}/{slides.length}
+          {t("editor.slidesDrawer", { index: slideIndex + 1, total: slides.length })}
         </span>
         <Button
           variant="ghost"
           size="icon"
           className="size-7"
           onClick={() => useEditor.getState().addSlide()}
-          title="新建幻灯片"
+          title={t("editor.newSlide")}
         >
           <Plus className="size-4" />
         </Button>
@@ -68,7 +70,7 @@ export function SlideList({ className }: { className?: string } = {}) {
                   onClick={() => useEditor.getState().setSlideIndex(index)}
                   // the thumbnail is the whole label, so without this the list reads as a
                   // column of unnamed buttons — and which one is open has to be audible too
-                  aria-label={`第 ${index + 1} 页`}
+                  aria-label={t("panel.slideNumber", { index: index + 1 })}
                   aria-current={index === slideIndex ? "true" : undefined}
                   className={cn(
                     "block w-full overflow-hidden rounded-md border bg-white transition",
@@ -84,7 +86,7 @@ export function SlideList({ className }: { className?: string } = {}) {
                     <Button
                       variant="secondary"
                       size="icon"
-                      aria-label={`第 ${index + 1} 页的操作`}
+                      aria-label={`${t("panel.slideNumber", { index: index + 1 })} — ${t("editor.slideActions")}`}
                       className="absolute right-1 top-1 size-6 opacity-0 shadow group-hover:opacity-100"
                     >
                       <MoreHorizontal className="size-3.5" />
@@ -92,14 +94,14 @@ export function SlideList({ className }: { className?: string } = {}) {
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start">
                     <DropdownMenuItem onClick={() => useEditor.getState().duplicateSlide(index)}>
-                      <Copy className="size-4" /> 复制此页
+                      <Copy className="size-4" /> {t("editor.duplicateSlide")}
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       variant="destructive"
                       disabled={slides.length <= 1}
                       onClick={() => useEditor.getState().deleteSlide(index)}
                     >
-                      <Trash2 className="size-4" /> 删除此页
+                      <Trash2 className="size-4" /> {t("editor.deleteSlide")}
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>

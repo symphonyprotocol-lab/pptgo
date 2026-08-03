@@ -3,14 +3,20 @@ import { and, desc, eq, sql } from "drizzle-orm"
 import { db } from "@/db"
 import { decks, type DeckRow } from "@/db/schema"
 import { deleteObjects, getObject, putObject } from "@/lib/s3"
-import { DEFAULT_THEME, VIEWPORT_HEIGHT, VIEWPORT_WIDTH } from "@/lib/constants"
-import { createSlide } from "@/lib/factory"
+import {
+  MAX_DECKS_PER_OWNER,
+  MAX_DECK_BYTES,
+  MAX_REQUEST_BYTES,
+  blankDeck,
+  encodeDeck,
+  parseDeck,
+  serializeDeck,
+} from "@/lib/deck-schema"
 import type { Deck } from "@/types/slides"
 import type { DeckSummary } from "@/types/deck"
 
-/** Guards against a runaway client pushing an unbounded document into the bucket. */
-export const MAX_DECK_BYTES = 25 * 1024 * 1024
-
+// the schema half is re-exported so callers reach one module for "a deck, stored"
+export { MAX_DECK_BYTES, MAX_REQUEST_BYTES, MAX_DECKS_PER_OWNER, blankDeck, encodeDeck, parseDeck }
 export type { DeckSummary }
 
 function summarize(row: DeckRow): DeckSummary {
@@ -49,9 +55,11 @@ export async function listDecks(ownerId: string): Promise<DeckSummary[]> {
 export async function createDeck(
   ownerId: string,
   deck: Deck,
+  /** the encoded document, when the caller already produced one to check its size */
+  encoded?: Uint8Array,
 ): Promise<DeckSummary> {
   const id = crypto.randomUUID()
-  const body = serialize(deck)
+  const body = encoded ?? serializeDeck(deck)
 
   // the document lands in the bucket first: an orphaned object is invisible, whereas a
   // row pointing at a missing object would be a deck that opens to an error
@@ -92,11 +100,13 @@ export async function writeDeck(
   id: string,
   ownerId: string,
   deck: Deck,
+  /** the encoded document, when the caller already produced one to check its size */
+  encoded?: Uint8Array,
 ): Promise<DeckSummary | null> {
   const [row] = await db.select().from(decks).where(owned(id, ownerId)).limit(1)
   if (!row) return null
 
-  const body = serialize(deck)
+  const body = encoded ?? serializeDeck(deck)
   await putObject(row.objectKey, body, "application/json")
 
   const [updated] = await db
@@ -130,7 +140,7 @@ export async function renameDeck(
   if (bytes) {
     const deck = JSON.parse(new TextDecoder().decode(bytes)) as Deck
     deck.title = title
-    await putObject(row.objectKey, serialize(deck), "application/json")
+    await putObject(row.objectKey, serializeDeck(deck), "application/json")
   }
 
   return summarize(row)
@@ -148,10 +158,18 @@ export async function deleteDeck(id: string, ownerId: string): Promise<boolean> 
 export async function duplicateDeck(
   id: string,
   ownerId: string,
+  /** suffix for the copy's title, in the caller's language */
+  copySuffix: string,
 ): Promise<DeckSummary | null> {
   const source = await readDeck(id, ownerId)
   if (!source) return null
-  return createDeck(ownerId, { ...source.deck, title: `${source.deck.title} 副本` })
+  const copy = { ...source.deck, title: `${source.deck.title} ${copySuffix}`.slice(0, 200) }
+  const body = encodeDeck(copy)
+  // the source was within the limit and the title only grew, so this is a formality —
+  // but `createDeck` is the one place that writes to the bucket and it should never be
+  // handed something the limit would have rejected
+  if (!body) return null
+  return createDeck(ownerId, copy, body)
 }
 
 export async function readThumbnail(
@@ -186,40 +204,4 @@ export async function countDecks(ownerId: string): Promise<number> {
     .from(decks)
     .where(eq(decks.ownerId, ownerId))
   return row?.value ?? 0
-}
-
-function serialize(deck: Deck): Uint8Array {
-  return new TextEncoder().encode(JSON.stringify(deck))
-}
-
-/**
- * A one-slide starter deck. The richer sample deck `createDeck()` builds is
- * browser-only — its text runs go through `sanitizeHtml`, which needs a DOM — so the
- * dashboard sends that one from the client and this is the fallback for a bare
- * `POST /api/decks`.
- */
-export function blankDeck(title: string): Deck {
-  return {
-    version: 1,
-    title,
-    width: VIEWPORT_WIDTH,
-    height: VIEWPORT_HEIGHT,
-    theme: DEFAULT_THEME,
-    slides: [createSlide()],
-  }
-}
-
-/**
- * Structural check on a document that arrived over the wire. It deliberately stops at
- * the slide list: the editor re-normalises and re-sanitises everything it loads, so the
- * server's job is to reject nonsense, not to validate every element.
- */
-export function parseDeck(value: unknown): Deck | null {
-  if (typeof value !== "object" || value === null) return null
-  const deck = value as Partial<Deck>
-  if (typeof deck.title !== "string" || !deck.title.trim()) return null
-  if (!Array.isArray(deck.slides) || deck.slides.length === 0) return null
-  if (typeof deck.width !== "number" || typeof deck.height !== "number") return null
-  if (typeof deck.theme !== "object" || deck.theme === null) return null
-  return { ...(deck as Deck), version: 1, title: deck.title.slice(0, 200) }
 }

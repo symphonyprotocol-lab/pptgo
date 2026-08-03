@@ -336,6 +336,76 @@ describe("tables", () => {
     expect(table().rows[0]).toHaveLength(3)
   })
 
+  it("keeps the column widths the user set when a column is added or removed", () => {
+    // an equal-share reset threw away tuned widths every time a column was touched
+    useEditor.getState().updateElement(table().id, { colWidths: [0.6, 0.2, 0.2] } as never)
+
+    useEditor.getState().addTableColumn(3)
+    expect(table().colWidths).toHaveLength(4)
+    expect(table().colWidths.reduce((a, b) => a + b, 0)).toBeCloseTo(1)
+    // the first column is still the widest, and still three times the second
+    expect(table().colWidths[0]).toBeGreaterThan(table().colWidths[1])
+    expect(table().colWidths[0] / table().colWidths[1]).toBeCloseTo(3)
+
+    useEditor.getState().setTableSelection([
+      [0, 3],
+      [0, 3],
+    ])
+    useEditor.getState().removeTableColumn()
+    expect(table().colWidths).toHaveLength(3)
+    expect(table().colWidths.reduce((a, b) => a + b, 0)).toBeCloseTo(1)
+    expect(table().colWidths[0]).toBeCloseTo(0.6)
+  })
+
+  /**
+   * Deleting the row or column an anchor sat in used to leave its `merged` neighbours
+   * pointing at nothing. The renderer skips a cell that claims to be covered, so the table
+   * came back a cell short per row with no way to get it back.
+   */
+  it("frees cells whose merge anchor was deleted", () => {
+    useEditor.getState().setTableSelection([
+      [0, 0],
+      [1, 1],
+    ])
+    useEditor.getState().mergeTableCells()
+    expect(table().rows[1][1].merged).toBe(true)
+
+    // remove the row holding the anchor
+    useEditor.getState().setTableSelection([
+      [0, 0],
+      [0, 0],
+    ])
+    useEditor.getState().removeTableRow()
+
+    expect(table().rows).toHaveLength(2)
+    for (const row of table().rows) {
+      for (const cell of row) expect(cell.merged).toBeFalsy()
+    }
+    // and every row still has a full set of cells to render
+    expect(table().rows.every((row) => row.filter((c) => !c.merged).length === 3)).toBe(true)
+  })
+
+  it("clamps a span that outgrew the grid it was left in", () => {
+    useEditor.getState().setTableSelection([
+      [1, 1],
+      [2, 2],
+    ])
+    useEditor.getState().mergeTableCells()
+
+    useEditor.getState().setTableSelection([
+      [2, 2],
+      [2, 2],
+    ])
+    useEditor.getState().removeTableRow()
+
+    for (const [r, row] of table().rows.entries()) {
+      for (const [c, cell] of row.entries()) {
+        expect(r + cell.rowspan).toBeLessThanOrEqual(table().rows.length)
+        expect(c + cell.colspan).toBeLessThanOrEqual(row.length)
+      }
+    }
+  })
+
   it("never removes the last row or column", () => {
     reset([createTableElement(1, 1)])
     useEditor.getState().setActiveIds(ids())

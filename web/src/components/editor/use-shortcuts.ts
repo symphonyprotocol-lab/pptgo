@@ -1,7 +1,11 @@
 "use client"
 
 import { useEffect } from "react"
-import { createImageElement, createTextElement, newId } from "@/lib/factory"
+import {
+  createImageElement,
+  createTextElement,
+  normalizeIncomingElements,
+} from "@/lib/factory"
 import { escapeHtml } from "@/lib/sanitize"
 import { useEditor } from "@/store/editor"
 import type { SlideElement } from "@/types/slides"
@@ -163,11 +167,9 @@ export function useShortcuts(enabled = true) {
       }
 
       const elements = parseElements(text)
-      if (elements) {
+      if (elements?.length) {
         event.preventDefault()
-        store.addElements(
-          elements.map((el) => ({ ...el, id: newId(), left: el.left + 20, top: el.top + 20 })),
-        )
+        store.addElements(elements.map((el) => ({ ...el, left: el.left + 20, top: el.top + 20 })))
         return
       }
 
@@ -190,12 +192,21 @@ export function useShortcuts(enabled = true) {
   }, [enabled])
 }
 
+/**
+ * Elements off the system clipboard, or null when it holds something else.
+ *
+ * The marker only says the payload is *shaped* like ours. Anything can write to the
+ * clipboard — a page with a "copy" button is enough — so the payload is put through the
+ * same normaliser a deck read from storage goes through rather than trusted on the
+ * strength of its own label. Without that, a crafted paste reached
+ * `dangerouslySetInnerHTML` with its markup intact, and the autosave then made it
+ * permanent.
+ */
 function parseElements(text: string): SlideElement[] | null {
   if (!text.includes(CLIPBOARD_TAG)) return null
   try {
     const parsed = JSON.parse(text) as Record<string, unknown>
-    const elements = parsed[CLIPBOARD_TAG]
-    return Array.isArray(elements) && elements.length ? (elements as SlideElement[]) : null
+    return normalizeIncomingElements(parsed[CLIPBOARD_TAG])
   } catch {
     return null
   }

@@ -1,21 +1,8 @@
 "use client"
 
 import type { CSSProperties } from "react"
-import { tint } from "@/lib/export"
+import { cellBackground, cellTextColor, isHeaderRow } from "@/lib/table-theme"
 import type { TableCell, TableElement } from "@/types/slides"
-
-export const isHeaderRow = (el: TableElement, row: number) => el.theme.rowHeader && row === 0
-
-export function cellBackground(el: TableElement, cell: TableCell, row: number): string {
-  if (cell.fill) return cell.fill
-  if (isHeaderRow(el, row)) return el.theme.color
-  if (el.theme.banded && row % 2 === 0) return tint(el.theme.color, 0.88)
-  return "#ffffff"
-}
-
-export function cellTextColor(el: TableElement, cell: TableCell, row: number): string {
-  return cell.color ?? (isHeaderRow(el, row) ? "#ffffff" : "#111827")
-}
 
 export function cellStyle(el: TableElement, cell: TableCell, row: number): CSSProperties {
   return {

@@ -3,7 +3,7 @@
 import type { CSSProperties } from "react"
 import { animationStateOf, buildSteps } from "@/lib/animation"
 import { VIEWPORT_HEIGHT, VIEWPORT_WIDTH } from "@/lib/constants"
-import type { Slide, SlideBackground } from "@/types/slides"
+import type { Slide, SlideBackground, SlideElement } from "@/types/slides"
 import { ElementBox } from "./element-view"
 
 export function backgroundStyle(background: SlideBackground): CSSProperties {
@@ -40,10 +40,12 @@ interface Props {
   animationStep?: number
   /** turn media elements into real players (presentation view) */
   playable?: boolean
+  /** makes element hyperlinks clickable; only the presentation view passes this */
+  onFollowLink?: (link: NonNullable<SlideElement["link"]>) => void
 }
 
 /** Read-only render of a slide at 1:1 scale; callers apply a CSS transform. */
-export function SlideView({ slide, animationStep, playable }: Props) {
+export function SlideView({ slide, animationStep, playable, onFollowLink }: Props) {
   const animated = animationStep !== undefined && !!slide.animations?.length
   const steps = animated ? buildSteps(slide.animations) : []
 
@@ -58,13 +60,23 @@ export function SlideView({ slide, animationStep, playable }: Props) {
       }}
     >
       {slide.elements.map((el) => {
-        if (!animated) return <ElementBox key={el.id} element={el} playable={playable} />
+        if (!animated) {
+          return (
+            <ElementBox
+              key={el.id}
+              element={el}
+              playable={playable}
+              onFollowLink={onFollowLink}
+            />
+          )
+        }
         const state = animationStateOf(el.id, steps, animationStep!)
         return (
           <ElementBox
             key={el.id}
             element={el}
             playable={playable}
+            onFollowLink={onFollowLink}
             style={{
               visibility: state.hidden ? "hidden" : "visible",
               animationName: state.effect,

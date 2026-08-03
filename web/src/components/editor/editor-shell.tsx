@@ -6,8 +6,9 @@ import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { useEditor } from "@/store/editor"
-import { normalizeDeck } from "@/lib/factory"
-import { localDeckStorage, type DeckStorage } from "@/lib/deck-storage"
+import { createDeck, normalizeDeck } from "@/lib/factory"
+import { useT } from "@/lib/i18n/client"
+import { type DeckStorage } from "@/lib/deck-storage"
 import { Canvas } from "./canvas"
 import { PresentView } from "./present-view"
 import { PropertyPanel } from "./property-panel"
@@ -17,21 +18,27 @@ import { useIsCompact } from "./use-media-query"
 import { useShortcuts } from "./use-shortcuts"
 
 export interface EditorShellProps {
-  /** defaults to the browser-local IndexedDB adapter */
-  storage?: DeckStorage
+  /** the IndexedDB adapter signed out, the API adapter signed in */
+  storage: DeckStorage
   /** where the wordmark links to — the dashboard when signed in */
   backHref?: string
 }
 
-export function EditorShell({
-  storage = localDeckStorage,
-  backHref = "/",
-}: EditorShellProps = {}) {
+export function EditorShell({ storage, backHref = "/" }: EditorShellProps) {
+  const t = useT()
   const [presenting, setPresenting] = useState(false)
   const [restored, setRestored] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const dirty = useRef(false)
+  /**
+   * Guards the first run of the autosave effect. That effect fires once as soon as
+   * `restored` flips, which meant simply opening a deck and reading it wrote the deck
+   * straight back: the dashboard's "last edited" moved, a thumbnail was re-rendered and
+   * re-uploaded, and the tile jumped to the front of a list ordered by edit time. Nothing
+   * had been edited.
+   */
+  const settled = useRef(false)
 
   const slides = useEditor((s) => s.slides)
   const slideIndex = useEditor((s) => s.slideIndex)
@@ -48,14 +55,16 @@ export function EditorShell({
     storage
       .load()
       .then((deck) => {
-        if (cancelled || !deck) return
-        // normalizeDeck also re-sanitises stored rich text before it is rendered
-        useEditor.getState().loadDeck(normalizeDeck(deck))
+        if (cancelled) return
+        // normalizeDeck also re-sanitises stored rich text before it is rendered. With
+        // nothing stored the starter deck is built here rather than in the store, so its
+        // wording is the reader's language and not whatever the module was authored in.
+        useEditor.getState().loadDeck(normalizeDeck(deck ?? createDeck(t), t))
       })
       .catch((error: Error) => {
         if (cancelled) return
         failed = true
-        setLoadError(error.message || "读取失败")
+        setLoadError(error.message || t("error.storageRead"))
       })
       .finally(() => {
         // autosave stays off after a failed load — otherwise the starter deck this
@@ -65,24 +74,32 @@ export function EditorShell({
     return () => {
       cancelled = true
     }
-  }, [storage])
+  }, [storage, t])
 
   // Everything persisted has to be in the dependency list, or renaming the deck (or
   // recolouring the theme) would be lost on reload.
   useEffect(() => {
     if (!restored) return
+    // the run triggered by `restored` itself is the load, not an edit
+    if (!settled.current) {
+      settled.current = true
+      return
+    }
     dirty.current = true
     const timer = window.setTimeout(() => {
+      // the store is the source of what gets written, so it has to still be holding a deck
+      // that was loaded — see `hydrated`
+      if (!useEditor.getState().hydrated) return
       storage
         .save(useEditor.getState().exportDeck())
         .then(() => {
           dirty.current = false
           setSaveError(null)
         })
-        .catch((error: Error) => setSaveError(error.message || "自动保存失败"))
+        .catch((error: Error) => setSaveError(error.message || t("error.storageSave")))
     }, 600)
     return () => window.clearTimeout(timer)
-  }, [slides, title, theme, restored, storage])
+  }, [slides, title, theme, restored, storage, t])
 
   useEffect(() => {
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -108,11 +125,15 @@ export function EditorShell({
                 <Sheet>
                   <SheetTrigger asChild>
                     <Button size="sm" variant="secondary" className="pointer-events-auto shadow-lg">
-                      <PanelLeft className="size-4" /> 幻灯片 {slideIndex + 1}/{slides.length}
+                      <PanelLeft className="size-4" />{" "}
+                      {t("editor.slidesDrawer", {
+                        index: slideIndex + 1,
+                        total: slides.length,
+                      })}
                     </Button>
                   </SheetTrigger>
                   <SheetContent side="left" className="w-64 p-0">
-                    <SheetTitle className="sr-only">幻灯片列表</SheetTitle>
+                    <SheetTitle className="sr-only">{t("editor.slideList")}</SheetTitle>
                     <SlideList className="w-full border-r-0" />
                   </SheetContent>
                 </Sheet>
@@ -121,11 +142,13 @@ export function EditorShell({
                   <SheetTrigger asChild>
                     <Button size="sm" variant="secondary" className="pointer-events-auto shadow-lg">
                       <Layers className="size-4" />
-                      {activeIds.length ? `已选 ${activeIds.length}` : "属性"}
+                      {activeIds.length
+                        ? t("editor.selectedCount", { count: activeIds.length })
+                        : t("editor.properties")}
                     </Button>
                   </SheetTrigger>
                   <SheetContent side="right" className="w-80 p-0">
-                    <SheetTitle className="sr-only">属性面板</SheetTitle>
+                    <SheetTitle className="sr-only">{t("editor.propertyPanel")}</SheetTitle>
                     <PropertyPanel className="w-full border-l-0" />
                   </SheetContent>
                 </Sheet>
@@ -142,12 +165,12 @@ export function EditorShell({
 
         {loadError && (
           <div className="border-t bg-destructive/10 px-3 py-1.5 text-xs text-destructive">
-            {loadError}——为免覆盖已保存的内容，自动保存已停用
+            {t("editor.loadFailed", { message: loadError })}
           </div>
         )}
         {saveError && (
           <div className="border-t bg-destructive/10 px-3 py-1.5 text-xs text-destructive">
-            {saveError}——请导出 JSON 备份当前内容
+            {t("editor.saveFailed", { message: saveError })}
           </div>
         )}
         {presenting && (

@@ -432,3 +432,71 @@ describe("importPptx", () => {
     expect(element.left).toBeGreaterThan(0) // letterboxed, not stretched
   })
 })
+
+describe("hostile input", () => {
+  /**
+   * `idx` is attacker-controlled and used to be written straight into a sparse array, so
+   * a single attribute made the next `Array.from` allocate a billion slots — a crashed tab
+   * from a file the reader only meant to open.
+   */
+  it("clamps a chart point index instead of allocating for it", async () => {
+    const huge = `<?xml version="1.0"?>
+      <c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart><c:plotArea>
+      <c:barChart><c:barDir val="col"/><c:ser>
+      <c:val><c:numRef><c:numCache>
+      <c:pt idx="0"><c:v>1</c:v></c:pt><c:pt idx="999999999"><c:v>2</c:v></c:pt>
+      </c:numCache></c:numRef></c:val></c:ser></c:barChart>
+      </c:plotArea></c:chart></c:chartSpace>`
+
+    const file = await buildPptx([slideDoc(chartFrame())], {
+      rels: `<Relationship Id="rId7" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" Target="../charts/chart1.xml"/>`,
+      parts: { "ppt/charts/chart1.xml": huge },
+    })
+
+    const deck = await importPptx(file)
+    const chart = deck.slides[0].elements[0] as ChartElement
+    expect(chart.type).toBe("chart")
+    expect(chart.data.series[0].values.length).toBeLessThanOrEqual(4096)
+  })
+
+  it("rejects an archive past the size ceiling before unzipping it", async () => {
+    const file = await buildPptx([slideDoc("")], {})
+    // the check is on `File.size`, so a stub is enough to exercise it without 100MB of heap
+    Object.defineProperty(file, "size", { value: 200 * 1024 * 1024 })
+    await expect(importPptx(file)).rejects.toThrow(/limit/i)
+  })
+
+  it("skips media a browser cannot render rather than importing broken pictures", async () => {
+    const body = `<p:pic><p:nvPicPr><p:cNvPr id="2" name="p"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr>
+      <p:blipFill><a:blip r:embed="rId9"/><a:stretch/></p:blipFill>
+      <p:spPr>${xfrm(0, 0, 914400, 914400)}</p:spPr></p:pic>`
+
+    const file = await buildPptx([slideDoc(body)], {
+      rels: `<Relationship Id="rId9" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.emf"/>`,
+      media: { "image1.emf": "AAAA" },
+    })
+
+    const deck = await importPptx(file)
+    expect(deck.slides[0].elements).toHaveLength(0)
+  })
+
+  it("treats a nonsense span as a span of one", async () => {
+    const cell = (extra: string) =>
+      `<a:tc ${extra}><a:txBody><a:p><a:r><a:t>x</a:t></a:r></a:p></a:txBody></a:tc>`
+    const body = `<p:graphicFrame><p:xfrm><a:off x="0" y="0"/><a:ext cx="914400" cy="914400"/></p:xfrm>
+      <a:graphic><a:graphicData><a:tbl>
+      <a:tblGrid><a:gridCol w="100"/><a:gridCol w="100"/></a:tblGrid>
+      <a:tr>${cell('gridSpan="oops"')}${cell('rowSpan="-3"')}</a:tr>
+      </a:tbl></a:graphicData></a:graphic></p:graphicFrame>`
+
+    const deck = await importPptx(await buildPptx([slideDoc(body)], {}))
+    const table = deck.slides[0].elements[0] as TableElement
+    for (const row of table.rows) {
+      for (const c of row) {
+        expect(Number.isInteger(c.colspan)).toBe(true)
+        expect(c.colspan).toBeGreaterThanOrEqual(1)
+        expect(c.rowspan).toBeGreaterThanOrEqual(1)
+      }
+    }
+  })
+})
