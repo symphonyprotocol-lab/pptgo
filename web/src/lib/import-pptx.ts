@@ -1,5 +1,6 @@
 import type JSZip from "jszip"
 import { DEFAULT_THEME, VIEWPORT_HEIGHT, VIEWPORT_WIDTH } from "./constants"
+import { MAX_DECK_BYTES } from "./deck-schema"
 import { singleLineFactor } from "./line-metrics"
 import {
   createChartElement,
@@ -61,6 +62,8 @@ interface ChartSpec {
   chartType: ChartType
   data: ChartData
   showLegend: boolean
+  /** per-series colours, present when the source states at least one */
+  colors?: string[]
 }
 
 interface ThemeInfo {
@@ -68,6 +71,8 @@ interface ThemeInfo {
   colors: Record<string, string>
   /** `a:fillStyleLst` and `a:bgFillStyleLst`, which `p:bgRef` indexes into */
   fills: { fill: Element[]; bg: Element[] }
+  /** `mj-lt` / `mn-ea` / … -> family, which a `+`-prefixed typeface names */
+  fonts: Record<string, string>
 }
 
 interface Ctx {
@@ -81,6 +86,7 @@ interface Ctx {
   media: Map<string, string>
   theme: Record<string, string>
   themeFills: ThemeInfo["fills"]
+  themeFonts: Record<string, string>
   /** relationship id -> parsed chart, preloaded because the shape walk is synchronous */
   charts: Map<string, ChartSpec>
 }
@@ -90,10 +96,21 @@ interface Ctx {
  * whole thing is decoded in the reader's own tab. These are the ceilings that keep a
  * malformed or hostile file from taking the tab down with it.
  */
-const MAX_PPTX_BYTES = 100 * 1024 * 1024
+/**
+ * The archive itself, held to the same ceiling as the document it becomes. A .pptx is
+ * already compressed, so one at the limit unpacks to more than the limit — but the media
+ * budget below is what actually bounds the result, and refusing the file up front is the
+ * only refusal that can happen before anything has been decoded.
+ */
+const MAX_PPTX_BYTES = MAX_DECK_BYTES
 const MAX_SLIDES = 500
-/** Total decoded media. Each image also becomes a base64 data URI, which is ~4/3 of this. */
-const MAX_MEDIA_BYTES = 60 * 1024 * 1024
+/**
+ * Total decoded media. Each image also becomes a base64 data URI, which is ~4/3 of this —
+ * so this is what decides whether the imported deck can be saved at all, and it is set
+ * against `MAX_DECK_BYTES` with room left over for the text, geometry and structure that
+ * share the document with it.
+ */
+const MAX_MEDIA_BYTES = Math.floor((MAX_DECK_BYTES * 0.9 * 3) / 4)
 /** Cached chart points are addressed by `idx`; a sparse array is only cheap while it is small. */
 const MAX_CHART_POINTS = 4096
 
@@ -275,9 +292,44 @@ async function resolveTheme(
       fill: fmt ? Array.from(first(fmt, "a:fillStyleLst")?.children ?? []) : [],
       bg: fmt ? Array.from(first(fmt, "a:bgFillStyleLst")?.children ?? []) : [],
     },
+    fonts: readFontScheme(xml),
   }
   cache.set(themePath, parsed)
   return parsed
+}
+
+/**
+ * The theme's two font pairs, keyed the way a typeface reference names them.
+ *
+ * A run does not have to name a family: it can point at the theme with `+mn-ea` ("the
+ * minor — i.e. body — East Asian font"), and Chinese decks do this constantly, because it
+ * is how one theme change restyles the whole deck. Those references were being dropped as
+ * unresolvable, so 400-odd runs in a deck like this lost their face and fell back to the
+ * app default — the single biggest reason an imported Chinese deck looks nothing like the
+ * original even when every size and colour is right.
+ */
+function readFontScheme(xml: Element | null): Record<string, string> {
+  const scheme = xml ? first(xml, "a:fontScheme") : null
+  if (!scheme) return {}
+
+  const fonts: Record<string, string> = {}
+  for (const [prefix, tag] of [
+    ["mj", "a:majorFont"],
+    ["mn", "a:minorFont"],
+  ] as const) {
+    const node = first(scheme, tag)
+    if (!node) continue
+    for (const [suffix, child] of [
+      ["lt", "a:latin"],
+      ["ea", "a:ea"],
+      ["cs", "a:cs"],
+    ] as const) {
+      const face = children(node, child)[0]?.getAttribute("typeface")
+      // the theme writes `typeface=""` for a slot it does not set
+      if (face) fonts[`${prefix}-${suffix}`] = face
+    }
+  }
+  return fonts
 }
 
 /**
@@ -334,18 +386,57 @@ async function readCharts(
   zip: JSZip,
   rels: Map<string, { type: string; target: string }>,
   t: Translate,
+  theme: Record<string, string>,
 ): Promise<Map<string, ChartSpec>> {
   const charts = new Map<string, ChartSpec>()
   for (const [id, rel] of rels) {
     if (rel.type !== "chart") continue
-    const xml = await readXml(zip, normalizePath(rel.target))
-    const spec = xml ? readChart(xml, t) : null
+    const path = normalizePath(rel.target)
+    const xml = await readXml(zip, path)
+    if (!xml) continue
+    // a chart may carry its own colour scheme in a themeOverride part; without it the
+    // series painted accent1/2/3 resolve against the slide's theme and come out wrong
+    const chartRels = await readRels(zip, path)
+    const override = [...chartRels.values()].find((r) => r.type === "themeOverride")
+    const overrideXml = override ? await readXml(zip, normalizePath(override.target)) : null
+    const colors = overrideXml ? { ...theme, ...readClrScheme(overrideXml) } : theme
+    const spec = readChart(xml, t, colors)
     if (spec) charts.set(id, spec)
   }
   return charts
 }
 
-function readChart(xml: Element, t: Translate): ChartSpec | null {
+/**
+ * The colour a series is painted with. A solid fill is itself; a gradient is represented
+ * by its most saturated stop (the last one, the way Office authors them); a line series
+ * keeps its colour on the outline rather than the fill.
+ */
+function seriesColor(ser: Element, theme: Record<string, string>): string | undefined {
+  const spPr = first(ser, "c:spPr")
+  if (!spPr) return undefined
+
+  const solid = children(spPr, "a:solidFill")[0]
+  if (solid) return colorOf(solid, theme)
+
+  const grad = children(spPr, "a:gradFill")[0]
+  if (grad) {
+    const stops = all(grad, "a:gs").sort(
+      (a, b) => Number(a.getAttribute("pos") ?? 0) - Number(b.getAttribute("pos") ?? 0),
+    )
+    const last = stops[stops.length - 1]
+    return last ? colorOf(last, theme) : undefined
+  }
+
+  const ln = children(spPr, "a:ln")[0]
+  const lnFill = ln ? children(ln, "a:solidFill")[0] : null
+  return lnFill ? colorOf(lnFill, theme) : undefined
+}
+
+function readChart(
+  xml: Element,
+  t: Translate,
+  theme: Record<string, string> = STOCK_SCHEME,
+): ChartSpec | null {
   const plot = first(xml, "c:plotArea")
   if (!plot) return null
 
@@ -358,6 +449,7 @@ function readChart(xml: Element, t: Translate): ChartSpec | null {
   const chartType = match.type === "column" && barDir === "bar" ? "bar" : match.type
 
   let categories: string[] = []
+  const colors: (string | undefined)[] = []
   const series = children(node, "c:ser").map((ser, index) => {
     const name =
       first(first(ser, "c:tx") ?? ser, "c:v")?.textContent?.trim() ||
@@ -365,6 +457,8 @@ function readChart(xml: Element, t: Translate): ChartSpec | null {
 
     const cats = cachedPoints(first(ser, "c:cat"))
     if (cats.length > categories.length) categories = cats
+
+    colors[index] = seriesColor(ser, theme)
 
     const values = cachedPoints(first(ser, "c:val") ?? first(ser, "c:yVal")).map((v) => {
       const parsed = Number(v)
@@ -382,6 +476,11 @@ function readChart(xml: Element, t: Translate): ChartSpec | null {
     chartType,
     data: { categories, series },
     showLegend: !!first(xml, "c:legend"),
+    // only carried when the source states at least one series colour; a chart that says
+    // nothing keeps the editor's own palette
+    colors: colors.some(Boolean)
+      ? colors.map((c, i) => c ?? DEFAULT_THEME.themeColors[i % DEFAULT_THEME.themeColors.length])
+      : undefined,
   }
 }
 
@@ -630,12 +729,19 @@ const BLANK: SlideBackground = { type: "solid", color: "#ffffff" }
 async function contextFor(
   zip: JSZip,
   path: string,
-  base: Omit<Ctx, "rels" | "theme" | "themeFills" | "charts">,
+  base: Omit<Ctx, "rels" | "theme" | "themeFills" | "themeFonts" | "charts">,
   themeCache: Map<string, ThemeInfo>,
 ): Promise<Ctx> {
   const rels = await readRels(zip, path)
   const theme = await resolveTheme(zip, path, themeCache)
-  return { ...base, rels, theme: theme.colors, themeFills: theme.fills, charts: await readCharts(zip, rels, base.t) }
+  return {
+    ...base,
+    rels,
+    theme: theme.colors,
+    themeFills: theme.fills,
+    themeFonts: theme.fonts,
+    charts: await readCharts(zip, rels, base.t, theme.colors),
+  }
 }
 
 /**
@@ -657,7 +763,7 @@ async function resolveTemplate(
   zip: JSZip,
   slidePath: string,
   slideXml: Element,
-  base: Omit<Ctx, "rels" | "theme" | "themeFills" | "charts">,
+  base: Omit<Ctx, "rels" | "theme" | "themeFills" | "themeFonts" | "charts">,
   themeCache: Map<string, ThemeInfo>,
   cache: Map<string, Template>,
 ): Promise<Template> {
@@ -709,11 +815,20 @@ async function linkedPart(zip: JSZip, path: string, type: string): Promise<strin
 }
 
 /**
- * The template's shapes, copied onto one slide.
+ * How much of the slide an element has to cover before it is locked on the way in.
  *
- * They are locked because they are furniture: a full-bleed backdrop sitting at the bottom
- * of the z-order would otherwise swallow every click on empty canvas. The layer panel is
- * where a reader unlocks one to edit or delete it.
+ * Only a backdrop earns it. Locking every template shape — which is what this used to do —
+ * meant more than half of an imported deck refused to move or open: on a typical slide of
+ * this one, eleven of sixteen elements, and among them the company name, the tagline and
+ * the header band, all of which read as ordinary slide content to whoever opens the file.
+ * The reason for locking never applied to those: it is that a full-bleed image sitting at
+ * the bottom of the z-order swallows every click meant for empty canvas, and a logo in the
+ * corner swallows nothing.
+ */
+const BACKDROP_COVERAGE = 0.9
+
+/**
+ * The template's shapes, copied onto one slide.
  *
  * The pictures among them repeat on every slide that shares the layout, which is the one
  * way this import can multiply its input — so their decoded size draws down a budget, and
@@ -724,6 +839,7 @@ function backdropOf(template: Template, budget: { media: number }): SlideElement
   const withImages = template.bytes <= budget.media
   if (withImages) budget.media -= template.bytes
 
+  const slideArea = VIEWPORT_WIDTH * VIEWPORT_HEIGHT
   const groups = new Map<string, string>()
   const elements: SlideElement[] = []
   for (const el of template.elements) {
@@ -732,7 +848,7 @@ function backdropOf(template: Template, budget: { media: number }): SlideElement
     elements.push({
       ...el,
       id: newId(),
-      lock: true,
+      lock: el.width * el.height >= slideArea * BACKDROP_COVERAGE,
       ...(el.groupId ? { groupId: groups.get(el.groupId) } : {}),
     })
   }
@@ -889,7 +1005,7 @@ function readShape(
   const spPr = first(node, "p:spPr")
   const preset = first(node, "a:prstGeom")?.getAttribute("prst") ?? ""
   const body = first(node, "p:txBody")
-  const paragraphs = body ? readParagraphs(body, ctx.theme, ctx.scale) : null
+  const paragraphs = body ? readParagraphs(body, ctx.theme, ctx.scale, ctx.themeFonts) : null
   const hasText = !!paragraphs?.html
 
   const { fill, gradient } = fillOf(node, spPr, ctx.theme)
@@ -1247,13 +1363,129 @@ interface ParsedText {
  * Theme references (`+mj-lt`, `+mn-lt`) are skipped — they are placeholders, not families,
  * and would otherwise be emitted as a font name that resolves to nothing.
  */
-function fontStackOf(rPr: Element): string | null {
+function fontStackOf(rPr: Element, fonts: Record<string, string> = {}): string | null {
   const faces = ["a:latin", "a:ea"]
     .map((tag) => first(rPr, tag)?.getAttribute("typeface"))
-    .filter((face): face is string => !!face && !face.startsWith("+"))
+    .map((face) => {
+      if (!face) return undefined
+      // `+mj-lt` / `+mn-ea` point at the theme's major or minor pair rather than naming a
+      // family; an unresolvable one is dropped, not emitted as a literal "+mn-ea"
+      if (!face.startsWith("+")) return face
+      return fonts[face.slice(1)]
+    })
+    .filter((face): face is string => !!face)
   const unique = [...new Set(faces)]
   if (!unique.length) return null
   return [...unique.map((face) => `'${face}'`), "sans-serif"].join(", ")
+}
+
+/**
+ * Decks written in Office draw their manual bullets by switching a one-character run into
+ * a symbol font: an "n" in Wingdings is the filled square ■, an "l" the filled circle ●.
+ * No reader outside Office maps those fonts, so carrying the letter through verbatim
+ * turned every bulleted list into lines prefixed with a bare "n".
+ *
+ * The run is translated to the Unicode character the glyph stands for — but only when
+ * every non-space character in it maps. A run this table only half-covers keeps its
+ * original text and font, which renders the glyph wherever the font exists and degrades
+ * to a letter where it does not, rather than mixing the two in one run.
+ */
+const SYMBOL_MAPS: Record<string, Record<string, string>> = {
+  wingdings: {
+    J: "☺",
+    L: "☹",
+    l: "●",
+    n: "■",
+    o: "❑",
+    u: "◆",
+    v: "❖",
+    w: "◈",
+    "§": "▪",
+    "¨": "□",
+    "Ø": "➢",
+    "à": "→",
+    "è": "→",
+    "û": "✗",
+    "ü": "✓",
+    "ý": "☒",
+    "þ": "☑",
+  },
+  symbol: { "·": "•", "¾": "—" },
+}
+
+function decodeSymbolText(text: string, rPr: Element | null): string | null {
+  if (!rPr) return null
+  const map = ["a:latin", "a:ea", "a:sym"]
+    .map((tag) => first(rPr, tag)?.getAttribute("typeface")?.toLowerCase())
+    .map((face) => (face ? SYMBOL_MAPS[face] : undefined))
+    .find(Boolean)
+  if (!map) return null
+
+  let out = ""
+  for (const ch of text) {
+    if (/\s/.test(ch)) {
+      out += ch
+      continue
+    }
+    // symbol glyphs are often stored in the U+F000 private-use block; fold them back
+    const code = ch.codePointAt(0)!
+    const folded =
+      code >= 0xf000 && code <= 0xf0ff ? String.fromCharCode(code - 0xf000) : ch
+    const mapped = map[folded]
+    if (mapped === undefined) return null
+    out += mapped
+  }
+  return out
+}
+
+/** Run properties a paragraph level's `a:defRPr` supplies when the run itself is silent. */
+interface RunDefaults {
+  size?: number
+  bold?: boolean
+  italic?: boolean
+  color?: string
+  face?: string
+  spc?: number
+  align?: string
+}
+
+/**
+ * The defaults a text body's own `a:lstStyle` states, by outline level.
+ *
+ * Office and WPS routinely put the entire look of a title there — `<a:defRPr sz="2800"
+ * b="1">` with a colour — and leave the run properties empty. Reading only the runs
+ * imported those titles at the 18px fallback in the default colour, which is most of what
+ * "the fonts are wrong" complaints look like.
+ */
+function listDefaults(
+  body: Element,
+  theme: Record<string, string>,
+  fonts: Record<string, string>,
+): (RunDefaults | undefined)[] {
+  const lst = first(body, "a:lstStyle")
+  if (!lst) return []
+
+  const levels: (RunDefaults | undefined)[] = []
+  for (let lvl = 0; lvl < 9; lvl += 1) {
+    const pPr = first(lst, `a:lvl${lvl + 1}pPr`)
+    if (!pPr) continue
+    const defRPr = first(pPr, "a:defRPr")
+    const defaults: RunDefaults = { align: pPr.getAttribute("algn") ?? undefined }
+    if (defRPr) {
+      const size = Number(defRPr.getAttribute("sz") ?? 0)
+      if (size) defaults.size = size
+      const bold = defRPr.getAttribute("b")
+      if (bold !== null) defaults.bold = bold === "1"
+      const italic = defRPr.getAttribute("i")
+      if (italic !== null) defaults.italic = italic === "1"
+      const spc = Number(defRPr.getAttribute("spc") ?? 0)
+      if (spc) defaults.spc = spc
+      defaults.color = colorOf(children(defRPr, "a:solidFill")[0] ?? null, theme)
+      defaults.face = fontStackOf(defRPr, fonts) ?? undefined
+    }
+    levels[lvl] = defaults
+  }
+  return levels
 }
 
 /**
@@ -1270,6 +1502,7 @@ function readParagraphs(
   body: Element,
   theme: Record<string, string>,
   scale: number,
+  fonts: Record<string, string> = {},
 ): ParsedText {
   // `normAutofit` is PowerPoint recording that it already shrank this text to fit its box.
   // The sizes on the runs are the sizes before that shrink, so a body carrying
@@ -1293,22 +1526,35 @@ function readParagraphs(
   let letterSpacing = 0
   let first_ = true
 
+  const defaults = listDefaults(body, theme, fonts)
+
   for (const paragraph of paragraphs) {
     const pPr = first(paragraph, "a:pPr")
-    const algn = pPr?.getAttribute("algn")
+    const rawLvl = Number(pPr?.getAttribute("lvl") ?? 0)
+    const def = defaults[Number.isInteger(rawLvl) && rawLvl >= 0 && rawLvl < 9 ? rawLvl : 0]
+    const algn = pPr?.getAttribute("algn") ?? def?.align
     const lnSpc = pPr ? first(pPr, "a:lnSpc") : null
     const runs: string[] = []
 
     for (const run of all(paragraph, "a:r")) {
-      const text = all(run, "a:t").map((t) => t.textContent ?? "").join("")
+      let text = all(run, "a:t").map((t) => t.textContent ?? "").join("")
       if (!text) continue
       const rPr = first(run, "a:rPr")
-      const size = Number(rPr?.getAttribute("sz") ?? 0)
-      const runBold = rPr?.getAttribute("b") === "1"
-      const runItalic = rPr?.getAttribute("i") === "1"
+      const decoded = decodeSymbolText(text, rPr)
+      if (decoded !== null) text = decoded
+      const size = Number(rPr?.getAttribute("sz") ?? 0) || def?.size || 0
+      const boldAttr = rPr?.getAttribute("b")
+      const runBold = boldAttr != null ? boldAttr === "1" : def?.bold ?? false
+      const italicAttr = rPr?.getAttribute("i")
+      const runItalic = italicAttr != null ? italicAttr === "1" : def?.italic ?? false
       const runUnderline = (rPr?.getAttribute("u") ?? "none") !== "none"
-      const runColor = colorOf(rPr ? first(rPr, "a:solidFill") : null, theme)
-      const face = rPr ? fontStackOf(rPr) : null
+      const runColor = colorOf(rPr ? first(rPr, "a:solidFill") : null, theme) ?? def?.color
+      // a decoded bullet must not keep its symbol font — the mapped character would be
+      // painted through the symbol font's own glyph table and come out as noise again
+      const face =
+        decoded !== null
+          ? def?.face ?? null
+          : (rPr ? fontStackOf(rPr, fonts) : null) ?? def?.face ?? null
 
       if (first_) {
         // the first run sets the element-level defaults
@@ -1320,7 +1566,7 @@ function readParagraphs(
         if (face) fontFamily = face
         // `spc` tightens or opens the tracking, in hundredths of a point like `sz`. Decks
         // use it to make a label fit its box exactly, so dropping it re-broke the line.
-        const spc = Number(rPr?.getAttribute("spc") ?? 0)
+        const spc = Number(rPr?.getAttribute("spc") ?? 0) || def?.spc || 0
         if (spc) letterSpacing = pxOf(spc)
         first_ = false
       }
@@ -1495,11 +1741,61 @@ function readGraphicFrame(
           chartType: spec.chartType,
           data: spec.data,
           showLegend: spec.showLegend,
+          ...(spec.colors && { themeColors: spec.colors }),
         }),
       }),
       groupId,
     },
   ]
+}
+
+/**
+ * The border a table draws, taken from the cells themselves.
+ *
+ * OOXML has no table-level border: every edge is stated per cell, on `a:tcPr` as `a:lnL`,
+ * `a:lnR`, `a:lnT` and `a:lnB`. The editor's table carries one outline for the whole grid,
+ * so the honest reduction — the one PPTist also makes — is to take the edge that appears
+ * most often and let it stand for the table.
+ *
+ * Doing nothing was not neutral: the element kept the editor's own default, a 1px #d4d4d8
+ * hairline, so every imported table came back in pale grey no matter what it was drawn
+ * with. This deck rules its tables in solid black, and looked visibly washed out.
+ */
+function tableOutline(
+  table: Element,
+  theme: Record<string, string>,
+): { style: "solid" | "dashed" | "dotted"; width: number; color: string } | undefined {
+  const tally = new Map<string, { count: number; value: NonNullable<ReturnType<typeof tableOutline>> }>()
+
+  for (const tcPr of all(table, "a:tcPr")) {
+    for (const side of ["a:lnL", "a:lnR", "a:lnT", "a:lnB"]) {
+      const ln = children(tcPr, side)[0]
+      // an edge the author turned off is a real answer, but not one worth painting
+      if (!ln || children(ln, "a:noFill").length) continue
+      const color = colorOf(children(ln, "a:solidFill")[0] ?? null, theme)
+      if (!color) continue
+
+      const dash = first(ln, "a:prstDash")?.getAttribute("val") ?? "solid"
+      const value = {
+        style: (dash.includes("dot") ? "dotted" : dash.includes("dash") ? "dashed" : "solid") as
+          | "solid"
+          | "dashed"
+          | "dotted",
+        // sub-pixel rules still have to be drawn; a table ruled at 0.5pt reads as ruled,
+        // and rounding it to zero would silently erase the grid
+        width: Math.max(1, Math.round(Number(ln.getAttribute("w") ?? 0) / EMU_PER_POINT)),
+        color,
+      }
+      const key = `${value.style}|${value.width}|${value.color}`
+      const seen = tally.get(key)
+      if (seen) seen.count += 1
+      else tally.set(key, { count: 1, value })
+    }
+  }
+
+  let best: { count: number; value: NonNullable<ReturnType<typeof tableOutline>> } | undefined
+  for (const entry of tally.values()) if (!best || entry.count > best.count) best = entry
+  return best?.value
 }
 
 function readTable(
@@ -1518,7 +1814,19 @@ function readTable(
 
   const rows: TableCell[][] = rowNodes.map((tr) =>
     children(tr, "a:tc").map((tc) => {
-      const text = all(tc, "a:t").map((t) => t.textContent ?? "").join("")
+      // paragraph per line, the way the cell was authored — flattening them glued every
+      // multi-line cell into one unbroken string
+      const text = all(tc, "a:p")
+        .map((p) =>
+          all(p, "a:r")
+            .map((r) => {
+              const runText = all(r, "a:t").map((t) => t.textContent ?? "").join("")
+              return decodeSymbolText(runText, first(r, "a:rPr")) ?? runText
+            })
+            .join(""),
+        )
+        .join("\n")
+        .replace(/\n+$/, "")
 
       // The cell's own fill lives in `a:tcPr`, and only there. Searching the whole cell
       // for a `a:solidFill` found the first one anywhere inside it — which for a cell with
@@ -1553,6 +1861,26 @@ function readTable(
     while (row.length < columns) row.push(createTableCell(""))
   }
 
+  // Cell insets and line spacing decide how tall the table really is. The source states
+  // both — this deck squeezes six rows into the frame with 9842-EMU insets — and
+  // rendering with the editor's roomier defaults instead inflated every imported table
+  // far past its frame and onto whatever sat below it.
+  const tcPr = first(table, "a:tcPr")
+  const inset = (attr: string, fallback: number) => {
+    const value = Number(tcPr?.getAttribute(attr) ?? NaN)
+    return Number.isFinite(value) && value >= 0 ? value : fallback
+  }
+  const cellPadding: [number, number] = [
+    Math.round(((inset("marT", 45720) + inset("marB", 45720)) / 2) * scale * 10) / 10,
+    Math.round(((inset("marL", 91440) + inset("marR", 91440)) / 2) * scale * 10) / 10,
+  ]
+  const lnSpc = first(table, "a:lnSpc")
+  const spcPct = lnSpc ? Number(first(lnSpc, "a:spcPct")?.getAttribute("val") ?? 0) : 0
+  const lineHeight = Math.round((spcPct > 0 ? spcPct / 100000 : 1) * 1.2 * 100) / 100
+
+  const firstSize = rows.flat().find((cell) => cell.fontSize)?.fontSize
+  const outline = tableOutline(table, theme)
+
   const base = createTableElement(rows.length, columns)
   return {
     ...base,
@@ -1563,6 +1891,10 @@ function readTable(
     // an imported table already carries whatever fills its author gave it; the editor's
     // own header tint and banding would paint rows the source deliberately left plain
     theme: { ...base.theme, rowHeader: false, banded: false },
+    cellPadding,
+    lineHeight,
+    ...(firstSize ? { fontSize: Math.round(firstSize) } : {}),
+    ...(outline ? { outline } : {}),
     groupId,
   }
 }

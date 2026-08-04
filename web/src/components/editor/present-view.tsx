@@ -81,36 +81,37 @@ export function PresentView({ slides, startIndex, onExit }: Props) {
     return () => window.clearInterval(id)
   }, [])
 
+  /**
+   * A `useState` updater has to be a pure function of the previous value. These three used
+   * to set one piece of state from inside another's updater, which React is free to call
+   * more than once — and in development it deliberately does. Every tap of "next" ran the
+   * nested `setIndex` twice and skipped a slide: 1, 3, 5.
+   */
   const goTo = useCallback(
     (next: number) => {
-      setIndex((current) => {
-        const clamped = Math.max(0, Math.min(next, slides.length - 1))
-        if (clamped !== current) setStep(0)
-        return clamped
-      })
+      setIndex(Math.max(0, Math.min(next, slides.length - 1)))
+      setStep(0)
     },
     [slides.length],
   )
 
   /** Advance the animation on this slide first, then move on. */
   const advance = useCallback(() => {
-    setStep((current) => {
-      if (current < stepCount) return current + 1
-      setIndex((i) => Math.min(i + 1, slides.length - 1))
-      return 0
-    })
-  }, [stepCount, slides.length])
+    if (step < stepCount) {
+      setStep(step + 1)
+      return
+    }
+    setStep(0)
+    setIndex((i) => Math.min(i + 1, slides.length - 1))
+  }, [step, stepCount, slides.length])
 
   const retreat = useCallback(() => {
-    setStep((current) => {
-      if (current > 0) return current - 1
-      setIndex((i) => {
-        const next = Math.max(i - 1, 0)
-        return next
-      })
-      return 0
-    })
-  }, [])
+    if (step > 0) {
+      setStep(step - 1)
+      return
+    }
+    setIndex((i) => Math.max(i - 1, 0))
+  }, [step])
 
   useEffect(() => {
     if (!autoplay) return

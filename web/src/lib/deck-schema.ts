@@ -2,8 +2,16 @@ import { DEFAULT_THEME, VIEWPORT_HEIGHT, VIEWPORT_WIDTH } from "@/lib/constants"
 import { createSlide } from "@/lib/factory"
 import type { Deck } from "@/types/slides"
 
-/** Guards against a runaway client pushing an unbounded document into the bucket. */
-export const MAX_DECK_BYTES = 25 * 1024 * 1024
+/**
+ * The ceiling on one stored document, and the number every other size limit is derived
+ * from. A deck carries its images inlined as base64, so this is reached by pictures rather
+ * than by slides: it is the size of the JSON that lands in the bucket.
+ *
+ * Raising it means raising `client_max_body_size` in `deploy/nginx/` to match, or the
+ * request is refused by nginx with a 413 before the app ever gets to say anything useful
+ * about it.
+ */
+export const MAX_DECK_BYTES = 50 * 1024 * 1024
 
 /**
  * Ceiling on the request body a deck arrives in. The envelope around the document is a key

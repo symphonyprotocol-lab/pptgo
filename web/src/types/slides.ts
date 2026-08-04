@@ -191,6 +191,10 @@ export interface TableElement extends BaseElement {
   outline: Outline
   fontFamily: string
   fontSize: number
+  /** cell inner padding in canvas units, [vertical, horizontal]; the renderer's own default when absent */
+  cellPadding?: [number, number]
+  /** cell line height as a CSS multiplier; the app default when absent */
+  lineHeight?: number
 }
 
 export type ChartType =

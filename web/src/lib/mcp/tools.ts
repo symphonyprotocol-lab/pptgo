@@ -14,13 +14,14 @@ import {
 import { createSlide, newId } from "@/lib/factory"
 import { DEFAULT_THEME } from "@/lib/constants"
 import { SHARE_LINK_TTL_DAYS, previewLink } from "@/lib/share-link"
+import { MAX_SHARE_PASSWORD, deleteShare, readShare, upsertShare } from "@/lib/shares"
 import { buildElement, elementSpec } from "./element-schema"
 import { outlineDeck } from "./outline"
 import { toStoredHtml } from "./text"
 import type { Deck, Slide, SlideElement } from "@/types/slides"
 
 /**
- * The ten tools.
+ * The thirteen tools.
  *
  * Granularity is a page for writing and an element for adjusting, which is how the work
  * actually arrives: a deck is composed a slide at a time, and revised one box at a time.
@@ -215,6 +216,91 @@ export function registerTools(server: McpServer, { ownerId, origin }: ToolContex
         previewUrl: await previewUrl(deckId),
         editorUrl: `${origin}/editor/${deckId}`,
       })
+    },
+  )
+
+  // ── sharing ────────────────────────────────────────────────────────────────
+
+  /*
+    A share link is a different promise from the preview link above. The preview link is
+    signed and expires; this one is a row, so it lasts until it is revoked, it can be read
+    back tomorrow to copy again, and it can be opened for editing. That also makes it the
+    more consequential of the two to hand out, which is why the descriptions say plainly
+    what each call puts into the world.
+  */
+
+  server.registerTool(
+    "deck_share_read",
+    {
+      title: "Check a deck's share link",
+      description:
+        "Whether this deck has a share link, and what it allows. Returns shared:false when there is none. Read this before offering to change a link — an owner may already have one out with people, and deck_share would replace its settings under them.",
+      inputSchema: z.object({ deckId: z.string() }),
+    },
+    async ({ deckId }) => {
+      const found = await readDeck(deckId, ownerId)
+      if (!found) return fail(DECK_NOT_FOUND)
+      const share = await readShare(deckId, ownerId)
+      if (!share) return ok({ deckId, shared: false })
+      return ok({
+        deckId,
+        shared: true,
+        url: `${origin}${share.path}`,
+        mode: share.mode,
+        hasPassword: share.hasPassword,
+        updatedAt: share.updatedAt,
+      })
+    },
+  )
+
+  server.registerTool(
+    "deck_share",
+    {
+      title: "Publish a share link",
+      description:
+        "Turns on a public link for this deck and returns it, or changes the settings of the one already there. The link needs no sign-in: anyone it reaches — or anyone it is forwarded to — can open the deck, and it keeps working until deck_unshare revokes it. Ask the user before publishing, tell them what the link allows, and do not post it anywhere public. Default is read-only; mode:'edit' lets strangers change the slides, so only pass it when the user has asked for that. A password limits the link to people who also have the passphrase — pass one only if the user gave you one to use, and repeat it back to them, because it cannot be read out again afterwards.",
+      inputSchema: z.object({
+        deckId: z.string(),
+        mode: z.enum(["read", "edit"]).optional(),
+        /** omitted leaves any existing password alone; null removes it */
+        password: z.string().min(1).max(MAX_SHARE_PASSWORD).nullable().optional(),
+      }),
+    },
+    async ({ deckId, mode, password }) => {
+      const existing = await readShare(deckId, ownerId)
+      const share = await upsertShare(deckId, ownerId, {
+        // an unstated mode keeps whatever the link already allows rather than quietly
+        // widening or narrowing it
+        mode: mode ?? existing?.mode ?? "read",
+        ...(password === undefined ? {} : { password }),
+      })
+      if (!share) return fail(DECK_NOT_FOUND)
+      return ok({
+        deckId,
+        url: `${origin}${share.path}`,
+        mode: share.mode,
+        hasPassword: share.hasPassword,
+        created: !existing,
+        note: share.hasPassword
+          ? "Anyone with the link and the password can open this deck until it is revoked."
+          : "Anyone with the link can open this deck, without signing in, until it is revoked.",
+      })
+    },
+  )
+
+  server.registerTool(
+    "deck_unshare",
+    {
+      title: "Revoke a deck's share link",
+      description:
+        "Stops the share link. Every copy of it that has been sent out fails on the next request. The deck itself is untouched, and a later deck_share issues a different link rather than reviving this one.",
+      inputSchema: z.object({ deckId: z.string() }),
+    },
+    async ({ deckId }) => {
+      const found = await readDeck(deckId, ownerId)
+      if (!found) return fail(DECK_NOT_FOUND)
+      const revoked = await deleteShare(deckId, ownerId)
+      return ok({ deckId, revoked, shared: false })
     },
   )
 

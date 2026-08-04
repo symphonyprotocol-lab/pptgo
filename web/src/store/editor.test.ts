@@ -109,6 +109,28 @@ describe("lock", () => {
   })
 })
 
+describe("handle element", () => {
+  it("remembers which of a selection was last pointed at", () => {
+    reset([
+      createShapeElement("rect", { left: 0, top: 0 }),
+      createTextElement({ left: 100, top: 0 }),
+    ])
+    const [shape, text] = ids()
+
+    useEditor.getState().setActiveIds([shape, text])
+    useEditor.getState().setHandleId(text)
+
+    expect(useEditor.getState().handleId).toBe(text)
+    // the panel resolves it against the selection, so a handle outside it simply misses
+    // and the caller falls back — no stale element is ever shown as selected
+    expect(useEditor.getState().activeIds).toContain(useEditor.getState().handleId)
+  })
+
+  it("starts with no handle", () => {
+    expect(useEditor.getState().handleId).toBe(null)
+  })
+})
+
 describe("grouping", () => {
   it("tags a group and clears it again", () => {
     reset([createTextElement(), createTextElement()])
@@ -262,6 +284,14 @@ describe("slides", () => {
     useEditor.getState().setBackground({ type: "solid", color: "#123456" })
     useEditor.getState().applyBackgroundToAll()
     expect(useEditor.getState().slides.every((s) => s.background.color === "#123456")).toBe(true)
+  })
+
+  it("applies one transition to every slide", () => {
+    useEditor.getState().addSlide()
+    useEditor.getState().setSlideIndex(0)
+    useEditor.getState().setTransition("fade")
+    useEditor.getState().applyTransitionToAll()
+    expect(useEditor.getState().slides.every((s) => s.transition === "fade")).toBe(true)
   })
 
   it("drops animations belonging to a deleted element", () => {

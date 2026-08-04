@@ -36,7 +36,20 @@ import { backgroundStyle } from "./slide-view"
 import { TableEditor } from "./table-editor"
 
 type Drag =
-  | { mode: "move"; x: number; y: number; scale: number; origins: SlideElement[]; moved: boolean }
+  | {
+      mode: "move"
+      x: number
+      y: number
+      scale: number
+      origins: SlideElement[]
+      moved: boolean
+      /**
+       * The element this gesture came down on, when it was already the only thing selected
+       * — the second click of the "click to select, click again to edit" pair that
+       * PowerPoint uses for a text box. Absent when the click also did the selecting.
+       */
+      reclicked?: SlideElement
+    }
   | {
       mode: "resize"
       x: number
@@ -187,8 +200,13 @@ export function Canvas() {
       return
     }
 
+    // what the style panel speaks for while a whole group is selected
+    store.setHandleId(element.id)
+
     let ids = store.activeIds
     const additive = event.shiftKey || event.metaKey || event.ctrlKey
+    // captured before the selection is rewritten below
+    const alreadyOnlySelection = !additive && ids.length === 1 && ids[0] === element.id
     if (additive) {
       const group = resolveSelection(element)
       ids = ids.includes(element.id)
@@ -212,6 +230,7 @@ export function Canvas() {
       scale: useEditor.getState().canvasScale,
       origins: originsOf(new Set(useEditor.getState().activeIds)),
       moved: false,
+      ...(alreadyOnlySelection ? { reclicked: element } : {}),
     }
   }
 
@@ -435,6 +454,29 @@ export function Canvas() {
       setGuides([])
       if (!state) return
       const store = useEditor.getState()
+
+      /**
+       * Click a selected element again and it opens for editing — PowerPoint's own second
+       * click on a text box, and the way in that does not depend on the browser deciding
+       * two clicks were close enough together to count as a double.
+       *
+       * A double-click is one gesture the page can be denied: the two clicks have to land
+       * on the same node within the system interval, and anything that re-renders between
+       * them — or an input stack that never synthesises `dblclick` at all — leaves an
+       * element that selects and highlights but refuses to open, with nothing on screen to
+       * say why. This path asks only that the pointer came down on something already
+       * selected and did not travel, so it survives all of that.
+       */
+      if (state.mode === "move" && !state.moved && state.reclicked) {
+        const el = state.reclicked
+        if (
+          !el.lock &&
+          (el.type === "text" || el.type === "shape" || el.type === "table" || el.type === "chart")
+        ) {
+          store.setEditingId(el.id)
+          return
+        }
+      }
 
       if (state.mode === "marquee") {
         const box = marqueeBox
@@ -686,13 +728,24 @@ export function Canvas() {
                     onDoubleClick={(e) => {
                       e.stopPropagation()
                       if (element.lock) return
+                      const store = useEditor.getState()
+                      // Drilling into a group: a single click selects the whole group,
+                      // which is right for moving it as one but leaves no way to reach a
+                      // member on its own — and an imported deck puts most of its shapes
+                      // in groups. A double-click means "this one". PPTist spends a second
+                      // double-click on the same step; entering the editor at the same
+                      // time keeps grouped text as quick to edit as it already was.
+                      if (element.groupId) {
+                        store.setActiveIds([element.id])
+                        store.setHandleId(element.id)
+                      }
                       if (
                         element.type === "text" ||
                         element.type === "shape" ||
                         element.type === "table" ||
                         element.type === "chart"
                       ) {
-                        useEditor.getState().setEditingId(element.id)
+                        store.setEditingId(element.id)
                       }
                     }}
                     style={{ pointerEvents: "auto", cursor: element.lock ? "default" : "move" }}

@@ -535,6 +535,11 @@ function addTable(slide: PptxSlide, el: TableElement) {
     ...frameOf(el),
     colW: el.colWidths.map((w) => inch(el.width * w)),
     rowH: el.rows.map(() => inch(el.height / Math.max(1, el.rows.length))),
+    // imported tables carry the source deck's cell insets; without them PowerPoint's
+    // default margins re-inflate rows that were authored tight
+    margin: el.cellPadding
+      ? [pt(el.cellPadding[0]), pt(el.cellPadding[1]), pt(el.cellPadding[0]), pt(el.cellPadding[1])]
+      : undefined,
     autoPage: false,
   })
 }

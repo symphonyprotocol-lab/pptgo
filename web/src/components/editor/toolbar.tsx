@@ -7,14 +7,17 @@ import {
   AlignHorizontalJustifyCenter,
   AlignStartHorizontal,
   AlignVerticalJustifyCenter,
+  ArrowLeft,
   ArrowRight,
   BarChart3,
   BringToFront,
+  Check,
   Copy,
   Download,
   Grid3x3,
   Group,
   Image as ImageIcon,
+  Loader2,
   Minus,
   Music,
   Paintbrush,
@@ -22,6 +25,7 @@ import {
   Play,
   Redo2,
   Ruler as RulerIcon,
+  Save,
   Search,
   SendToBack,
   Shapes,
@@ -60,6 +64,7 @@ import { exportImages, exportPdf } from "@/lib/export-media"
 import { formatBytes, importPptx } from "@/lib/import-pptx"
 import { SHAPE_LIST } from "@/lib/shapes"
 import { VIEWPORT_HEIGHT, VIEWPORT_WIDTH } from "@/lib/constants"
+import { MAX_DECK_BYTES } from "@/lib/deck-schema"
 import { useT } from "@/lib/i18n/client"
 import { useEditor } from "@/store/editor"
 import type { DeckLibrary } from "@/lib/deck-storage"
@@ -105,23 +110,36 @@ function IconButton({
 
 /**
  * What a single inserted file may weigh. Everything embeds as a base64 data URI inside the
- * deck document, so these are budgets against the 25MB a deck may be saved at — and the
- * point of checking here is that the alternative was letting someone drop in a 200MB video,
- * work for twenty minutes, and be told at the first autosave that none of it could be kept.
+ * deck document, so these are budgets against `MAX_DECK_BYTES` — and the point of checking
+ * here is that the alternative was letting someone drop in a 200MB video, work for twenty
+ * minutes, and be told at the first autosave that none of it could be kept.
  */
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024
 const MAX_MEDIA_BYTES = 20 * 1024 * 1024
-const MAX_DECK_FILE_BYTES = 40 * 1024 * 1024
+/**
+ * A whole document rather than one asset, so it is the document ceiling itself. Holding a
+ * lower number here refused files the app could store, and refused them by name — a 45MB
+ * deck was turned away by the editor rather than by anything that knew what the limit was.
+ */
+const MAX_DECK_FILE_BYTES = MAX_DECK_BYTES
+
+/** What the Save button is showing; `saved` is a short acknowledgement, not a resting state. */
+export type SaveState = "idle" | "saving" | "saved"
 
 export function Toolbar({
   onPresent,
   backHref = "/",
   library,
+  save,
+  saveState = "idle",
 }: {
   onPresent: () => void
   backHref?: string
   /** the decks this editor can switch between, when its storage keeps any */
   library?: DeckLibrary | null
+  /** absent where there is nothing to save to, which hides the button entirely */
+  save?: () => void | Promise<void>
+  saveState?: SaveState
 }) {
   const t = useT()
   const title = useEditor((s) => s.title)
@@ -254,6 +272,19 @@ export function Toolbar({
       >
         <LogoMark />
       </Link>
+      {/*
+        The mark beside this links to the same place, but it reads as "home" rather than
+        as the way out of a document — so the way back to the deck list was a thing you had
+        to already know. Named, and next to the title it belongs to.
+      */}
+      {backHref !== "/" && (
+        <Button asChild variant="ghost" size="sm" className="order-1 shrink-0">
+          <Link href={backHref}>
+            <ArrowLeft className="size-4" />
+            <span className="hidden lg:inline">{t("site.myDecks")}</span>
+          </Link>
+        </Button>
+      )}
       {library && <OpenMenu library={library} />}
       <Input
         value={title}
@@ -546,6 +577,30 @@ export function Toolbar({
 
       <div className="order-3 ml-auto flex shrink-0 items-center gap-1 lg:order-4 lg:ml-0">
       {busy && <span className="shrink-0 text-xs text-muted-foreground">{busy}</span>}
+
+      {/*
+        Saving on purpose. The deck autosaves anyway, but that is invisible: this is where
+        someone about to close the tab can put the question to rest and watch it answered.
+      */}
+      {save && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="shrink-0"
+          disabled={saveState === "saving"}
+          title={t("editor.saveHint")}
+          onClick={() => void save()}
+        >
+          {saveState === "saving" ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : saveState === "saved" ? (
+            <Check className="size-4 text-primary" />
+          ) : (
+            <Save className="size-4" />
+          )}
+          {saveState === "saved" ? t("editor.saved") : t("editor.save")}
+        </Button>
+      )}
 
       <Button
         variant="ghost"

@@ -1,6 +1,40 @@
+import type { CSSProperties } from "react"
 import type { ImageElement } from "@/types/slides"
 
 const NEUTRAL = { blur: 0, brightness: 100, contrast: 100, grayscale: 0, saturate: 100, sepia: 0 }
+
+/**
+ * Where the bitmap sits inside its frame, given the crop.
+ *
+ * A crop states the visible fraction of the source, so the image is blown up by the
+ * inverse of that fraction and shifted to bring the window into view — the frame's
+ * `overflow: hidden` does the cutting.
+ *
+ * `maxWidth` is the load-bearing part. The stylesheet's reset caps every image at
+ * `max-width: 100%`, which quietly cancelled the blow-up: a horizontally cropped picture
+ * was clamped back to its frame, so the crop never took and the whole bitmap was squeezed
+ * into the width instead — the aspect ratio lost and the cropped-away part still on show.
+ * Nothing caps the height, which is why the distortion only ever appeared horizontally.
+ */
+export function cropStyle(clip: ImageElement["clip"]): CSSProperties {
+  const [[x1, y1], [x2, y2]] = clip?.range ?? [
+    [0, 0],
+    [1, 1],
+  ]
+  const spanX = Math.max(0.01, x2 - x1)
+  const spanY = Math.max(0.01, y2 - y1)
+
+  return {
+    position: "absolute",
+    width: `${100 / spanX}%`,
+    height: `${100 / spanY}%`,
+    left: `${(-x1 / spanX) * 100}%`,
+    top: `${(-y1 / spanY) * 100}%`,
+    maxWidth: "none",
+    maxHeight: "none",
+    objectFit: "fill",
+  }
+}
 
 export function filterCss(filter: ImageElement["filter"]): string {
   return (

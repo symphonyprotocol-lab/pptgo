@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
-import { PenLine, Radio } from "lucide-react"
+import { Maximize, PenLine, Radio } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { PresentView } from "@/components/editor/present-view"
 import { SlideThumbnail, SlideView } from "@/components/editor/slide-view"
 import { SHARE_KEY_PARAM, SHARE_TOKEN_PARAM, VIEWPORT_HEIGHT, VIEWPORT_WIDTH } from "@/lib/constants"
 import { normalizeDeck } from "@/lib/factory"
@@ -64,6 +65,7 @@ export function PreviewShell({
    */
   const [following, setFollowing] = useState(true)
   const [jumped, setJumped] = useState<number | null>(null)
+  const [presenting, setPresenting] = useState(false)
 
   const followingRef = useRef(true)
   const versionRef = useRef(0)
@@ -196,6 +198,22 @@ export function PreviewShell({
 
   const current = deck.slides[Math.min(index, deck.slides.length - 1)]
 
+  /*
+    The editor's own presentation view, handed the shared deck. It fits the window, takes
+    arrow keys, and asks the browser for real fullscreen — so a reader following along on a
+    link gets the same thing the owner gets, rather than a second, smaller implementation.
+    Live updates keep arriving behind it: `slides` is the current deck on every render.
+  */
+  if (presenting) {
+    return (
+      <PresentView
+        slides={deck.slides}
+        startIndex={index}
+        onExit={() => setPresenting(false)}
+      />
+    )
+  }
+
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
       <header className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-border px-4 py-2.5">
@@ -218,6 +236,17 @@ export function PreviewShell({
         </span>
 
         <div className="ml-auto flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 px-2 text-xs"
+            title={t("preview.fullscreenHint")}
+            onClick={() => setPresenting(true)}
+          >
+            <Maximize className="size-3.5" />
+            {t("preview.fullscreen")}
+          </Button>
+
           <Button
             size="sm"
             variant={following ? "secondary" : "ghost"}
@@ -246,8 +275,19 @@ export function PreviewShell({
         </div>
       </header>
 
-      <div ref={stage} className="relative min-h-0 flex-1 bg-stage p-6">
-        <div className="absolute inset-6 grid place-items-center">
+      {/*
+        `overflow-hidden` is the backstop: the slide is sized from a measurement, and a
+        measurement that is ever too generous should crop rather than spill over the
+        thumbnail rail below.
+      */}
+      <div className="relative min-h-0 flex-1 overflow-hidden bg-stage p-6">
+        {/*
+          Measured here rather than on the padded parent. `clientWidth`/`clientHeight`
+          include padding, so scaling against the parent sized every slide to a box 48px
+          wider and taller than the one it is actually placed in — the slide overhung the
+          stage on all four sides and covered the thumbnails underneath it.
+        */}
+        <div ref={stage} className="absolute inset-6 grid place-items-center">
           <div
             style={{
               width: VIEWPORT_WIDTH * scale,
