@@ -1,6 +1,6 @@
-import { VIEWPORT_HEIGHT, VIEWPORT_WIDTH } from "@/lib/constants"
+import { lintSlide } from "./lint"
 import { toPlainText, truncate } from "./text"
-import type { Deck, Slide, SlideElement } from "@/types/slides"
+import type { Deck, DeckTheme, Slide, SlideElement } from "@/types/slides"
 
 /**
  * What an agent reads instead of looking at the deck.
@@ -18,22 +18,6 @@ import type { Deck, Slide, SlideElement } from "@/types/slides"
 
 const TEXT_LIMIT = 80
 const NOTES_LIMIT = 200
-
-/** How far outside the canvas an element may sit before it is worth mentioning. */
-const EDGE_TOLERANCE = 2
-
-/** Fraction of the smaller element that has to be covered before an overlap is reported. */
-const OVERLAP_THRESHOLD = 0.25
-
-/**
- * Types whose overlap is a bug rather than a layout.
- *
- * Text over a rounded rectangle is the most common thing on any slide, and an image behind
- * a caption is the second — flagging those would make the warnings worth ignoring, which
- * is worse than not having them. Two blocks of *content* on top of each other is the case
- * that is almost never deliberate.
- */
-const COLLIDABLE = new Set(["text", "table", "chart", "formula"])
 
 export interface OutlineElement {
   id: string
@@ -108,66 +92,16 @@ function describe(element: SlideElement): string | undefined {
   }
 }
 
-function overlapArea(a: SlideElement, b: SlideElement): number {
-  const x = Math.min(a.left + a.width, b.left + b.width) - Math.max(a.left, b.left)
-  const y = Math.min(a.top + a.height, b.top + b.height) - Math.max(a.top, b.top)
-  return x > 0 && y > 0 ? x * y : 0
-}
-
-const label = (element: SlideElement) => element.name || element.id
-
 /**
  * The stand-in for looking at the slide.
  *
- * It cannot tell an agent whether a layout is *good*. It can tell it that something is off
- * the canvas or that two paragraphs are on top of each other, which is the bulk of what
- * goes wrong when you place elements by coordinate without being able to see the result.
+ * The theme is optional because `outlineSlide` is also the summary of a single slide, and
+ * the checks that need it — contrast against the page, colours outside the palette — are
+ * additions to a list that stands up without them rather than the point of it.
  */
-function warnings(slide: Slide): string[] {
-  const found: string[] = []
-
-  for (const element of slide.elements) {
-    const right = element.left + element.width
-    const bottom = element.top + element.height
-    if (
-      element.left < -EDGE_TOLERANCE ||
-      element.top < -EDGE_TOLERANCE ||
-      right > VIEWPORT_WIDTH + EDGE_TOLERANCE ||
-      bottom > VIEWPORT_HEIGHT + EDGE_TOLERANCE
-    ) {
-      found.push(
-        `${label(element)} extends outside the ${VIEWPORT_WIDTH}×${VIEWPORT_HEIGHT} canvas ` +
-          `(${round(element.left)},${round(element.top)} to ${round(right)},${round(bottom)})`,
-      )
-    }
-
-    if (element.type === "text" && !toPlainText(element.content).trim()) {
-      found.push(`${label(element)} is an empty text box`)
-    }
-  }
-
-  const collidable = slide.elements.filter((element) => COLLIDABLE.has(element.type))
-  for (let i = 0; i < collidable.length; i++) {
-    for (let j = i + 1; j < collidable.length; j++) {
-      const a = collidable[i]
-      const b = collidable[j]
-      const smaller = Math.min(a.width * a.height, b.width * b.height)
-      if (smaller <= 0) continue
-      const share = overlapArea(a, b) / smaller
-      if (share > OVERLAP_THRESHOLD) {
-        found.push(
-          `${label(a)} and ${label(b)} overlap by ${Math.round(share * 100)}% of the smaller one`,
-        )
-      }
-    }
-  }
-
-  return found
-}
-
-export function outlineSlide(slide: Slide, index: number): OutlineSlide {
+export function outlineSlide(slide: Slide, index: number, theme?: DeckTheme): OutlineSlide {
   const notes = truncate(slide.notes ?? "", NOTES_LIMIT)
-  const found = warnings(slide)
+  const found = lintSlide(slide, theme)
 
   return {
     id: slide.id,
@@ -205,6 +139,6 @@ export function outlineDeck(
     slideCount: deck.slides.length,
     previewUrl,
     canvas: { width: deck.width, height: deck.height },
-    slides: deck.slides.map(outlineSlide),
+    slides: deck.slides.map((slide, index) => outlineSlide(slide, index, deck.theme)),
   }
 }

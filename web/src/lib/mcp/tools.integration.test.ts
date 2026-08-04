@@ -260,4 +260,99 @@ describe.skipIf(!live)("the MCP tools against real storage", () => {
     expect((await other("deck_share_read", { deckId: deck.deckId })).failed).toBe(true)
     expect((await other("deck_unshare", { deckId: deck.deckId })).failed).toBe(true)
   })
+
+  /**
+   * The design tools go through the same write path as everything else, which is the
+   * point: a laid-out page is a page, so it takes a version, it can be refused, and what
+   * lands is ordinary elements that the next `element_patch` can adjust.
+   */
+  describe("the design tools", () => {
+    it("catalogues themes and page types without touching a deck", async () => {
+      const { failed, body } = await call("design_catalog", {})
+      expect(failed).toBe(false)
+      expect((body.themes as unknown[]).length).toBeGreaterThan(0)
+      expect((body.layouts as unknown[]).length).toBeGreaterThan(0)
+      expect(body.grid).toMatchObject({ columns: 12, margin: 60 })
+    })
+
+    it("sets a whole look from one name, and reports what it resolved to", async () => {
+      const deck = await freshDeck()
+      const { failed, body } = await call("deck_theme_preset", {
+        deckId: deck.deckId,
+        baseVersion: deck.version,
+        preset: "dark-tech",
+      })
+
+      expect(failed).toBe(false)
+      expect(body.preset).toBe("dark-tech")
+      expect((body.colors as Record<string, string>).background).toBe("#0b1020")
+    })
+
+    it("lays out a page whose elements the outline then has nothing to say about", async () => {
+      const deck = await freshDeck()
+      const themed = await call("deck_theme_preset", {
+        deckId: deck.deckId,
+        baseVersion: deck.version,
+        preset: "editorial",
+      })
+
+      const written = await call("slide_layout", {
+        deckId: deck.deckId,
+        baseVersion: themed.body.version,
+        layout: {
+          layout: "bullets",
+          title: "Three changes we shipped",
+          points: ["Invitations carry the workspace", "SSO resolves from the domain", "Five steps, not eleven"],
+        },
+        notes: "the middle one is the expensive one",
+      })
+
+      expect(written.failed).toBe(false)
+      expect(written.body.layout).toBe("bullets")
+
+      const outline = (await call("deck_outline", { deckId: deck.deckId })).body
+      const slide = (outline.slides as { id: string; notes?: string; warnings?: string[] }[]).at(-1)!
+      expect(slide.warnings).toBeUndefined()
+      expect(slide.notes).toContain("expensive")
+    })
+
+    it("leaves behind elements that element_patch can still adjust", async () => {
+      const deck = await freshDeck()
+      const written = await call("slide_layout", {
+        deckId: deck.deckId,
+        baseVersion: deck.version,
+        layout: { layout: "statement", text: "We shipped it." },
+      })
+
+      const outline = (await call("deck_outline", { deckId: deck.deckId })).body
+      const slide = (outline.slides as { id: string; elements: { id: string; text?: string }[] }[]).at(-1)!
+      const statement = slide.elements.find((one) => one.text?.includes("shipped"))!
+
+      const patched = await call("element_patch", {
+        deckId: deck.deckId,
+        slideId: written.body.slideId,
+        elementId: statement.id,
+        baseVersion: written.body.version,
+        patch: { text: "We shipped it early." },
+      })
+      expect(patched.failed).toBe(false)
+    })
+
+    it("is refused from a stale version like every other write", async () => {
+      const deck = await freshDeck()
+      await call("slide_layout", {
+        deckId: deck.deckId,
+        baseVersion: 1,
+        layout: { layout: "closing", title: "Thank you" },
+      })
+
+      const { failed, body } = await call("slide_layout", {
+        deckId: deck.deckId,
+        baseVersion: 1,
+        layout: { layout: "closing", title: "Thank you" },
+      })
+      expect(failed).toBe(true)
+      expect(String(body.error)).toContain("moved on")
+    })
+  })
 })

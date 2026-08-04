@@ -79,12 +79,20 @@ describe("geometry warnings", () => {
   it("says nothing about a slide that is laid out sensibly", () => {
     const outline = outlineSlide(
       slideOf([
-        text({ left: 60, top: 40, width: 400, height: 60 }),
-        text({ left: 60, top: 140, width: 400, height: 60, text: "second" }),
+        text({ left: 60, top: 60, width: 400, height: 60 }),
+        text({ left: 60, top: 160, width: 400, height: 60, text: "second" }),
       ]),
       0,
     )
     expect(outline.warnings).toBeUndefined()
+  })
+
+  it("reports content parked inside the margin, but not content run to the edge", () => {
+    const crowded = outlineSlide(slideOf([text({ left: 18, top: 200, width: 400, height: 60 })]), 0)
+    expect(crowded.warnings?.some((one) => one.includes("margin"))).toBe(true)
+
+    const bleeding = outlineSlide(slideOf([text({ left: 0, top: 200, width: 400, height: 60 })]), 0)
+    expect(bleeding.warnings).toBeUndefined()
   })
 
   it("reports an element that runs off the canvas", () => {
@@ -113,8 +121,18 @@ describe("geometry warnings", () => {
   it("says nothing about text sitting on a shape, which is a layout rather than a bug", () => {
     const outline = outlineSlide(
       slideOf([
-        buildElement({ type: "shape", shapeKey: "roundRect", left: 60, top: 40, width: 400, height: 120 }),
-        text({ left: 80, top: 60, width: 360, height: 80 }),
+        buildElement({ type: "shape", shapeKey: "roundRect", left: 60, top: 60, width: 400, height: 120 }),
+        // white on the shape's own blue: the contrast check reads the plate underneath, so
+        // the deck's dark default ink would legitimately be reported here
+        buildElement({
+          type: "text",
+          text: "hello",
+          color: "#ffffff",
+          left: 80,
+          top: 80,
+          width: 360,
+          height: 80,
+        }),
       ]),
       0,
     )

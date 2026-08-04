@@ -205,7 +205,10 @@ const zh = {
 
   "mcp.toolsHeading": "接上之后 agent 能做什么",
   "mcp.toolsBody":
-    "十三个工具，粒度是「写按页、改按元素」。刻意没有「一次生成整份稿子」那种工具：那会让模型把东西攒到最后一次吐出来，而这一页页出现的过程正是给人看的。",
+    "十六个工具，粒度是「写按页、改按元素」。刻意没有「一次生成整份稿子」那种工具：那会让模型把东西攒到最后一次吐出来，而这一页页出现的过程正是给人看的。",
+  "mcp.toolsDesign": "排版",
+  "mcp.toolsDesignBody":
+    "十八种版式和八套主题。模型只填内容槽——标题、最多六条要点、四张卡片、一张图表和它的结论——坐标、字号、配色由服务端算。模型看不见渲染结果，这部分本来就不该由它猜。产出的是普通元素，人打开之后照样随便拖。",
   "mcp.toolsRead": "读",
   "mcp.toolsReadBody":
     "列出稿子、读整体结构（含位置明显不对的元素）、读某一页的全部细节。写之前先读，写完再读一遍对结果。",
@@ -895,7 +898,10 @@ const en: Record<keyof typeof zh, string> = {
 
   "mcp.toolsHeading": "What the agent can do once it is connected",
   "mcp.toolsBody":
-    "Thirteen tools, at the granularity the work actually arrives in: a page for writing, an element for adjusting. There is deliberately no write-the-whole-deck tool — that would let a model buffer everything and emit it at the end, and a deck appearing a page at a time is the part a person is watching.",
+    "Sixteen tools, at the granularity the work actually arrives in: a page for writing, an element for adjusting. There is deliberately no write-the-whole-deck tool — that would let a model buffer everything and emit it at the end, and a deck appearing a page at a time is the part a person is watching.",
+  "mcp.toolsDesign": "Lay out",
+  "mcp.toolsDesignBody":
+    "Eighteen page types and eight themes. The model fills named slots — a title and up to six points, four cards, a chart and its takeaway — and the grid, the type sizes that make them fit and the contrast-checked colours happen here. It never sees the render, so that half was never its to guess. What lands is ordinary elements, which the person who opens the deck drags around like anything else.",
   "mcp.toolsRead": "Read",
   "mcp.toolsReadBody":
     "List decks, read a deck's structure (including elements that have ended up somewhere wrong), read one slide in full. Read before writing, and again afterwards to check the result.",
