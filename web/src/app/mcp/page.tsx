@@ -39,6 +39,7 @@ async function publicOrigin(): Promise<string> {
 }
 
 const TOOLS: { key: string; label: MessageKey; body: MessageKey }[] = [
+  { key: "design", label: "mcp.toolsDesign", body: "mcp.toolsDesignBody" },
   { key: "read", label: "mcp.toolsRead", body: "mcp.toolsReadBody" },
   { key: "write", label: "mcp.toolsWrite", body: "mcp.toolsWriteBody" },
   { key: "preview", label: "mcp.toolsPreview", body: "mcp.toolsPreviewBody" },
