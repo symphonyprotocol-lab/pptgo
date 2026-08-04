@@ -13,6 +13,7 @@ import {
   createTextElement,
   newId,
 } from "./factory"
+import { cssAngle } from "./ooxml-fill"
 import { escapeHtml } from "./sanitize"
 import { fallbackTranslate, type Translate } from "./i18n/translate"
 import { SHAPE_LIST, SHAPE_MAP } from "./shapes"
@@ -36,26 +37,76 @@ const EMU_PER_POINT = 12700
 
 /** Preset geometry name -> our shape key, for the presets we can draw. */
 const KEY_BY_PRESET = new Map(SHAPE_LIST.map((s) => [s.preset, s.key]))
+/**
+ * Presets the registry does not draw itself, sent to the nearest one that it does. A
+ * source shape only lands here when no entry in `SHAPE_LIST` claims its preset, so the
+ * table shrinks as the registry grows — and every alias is a shape that comes back out of
+ * the round trip as something slightly different from what went in, which is the reason to
+ * prefer adding a preset over adding a line here.
+ */
 const PRESET_ALIASES: Record<string, string> = {
-  roundRect: "roundRect",
-  round1Rect: "roundRect",
   round2SameRect: "roundRect",
-  snip1Rect: "rect",
-  homePlate: "chevron",
-  bentArrow: "arrowRight",
+  round2DiagRect: "roundRect",
+  snip2SameRect: "snip1Rect",
+  snip2DiagRect: "snip1Rect",
+  snipRoundRect: "round1Rect",
   mathPlus: "cross",
-  star7: "star6",
-  star8: "star6",
-  star10: "star6",
-  star12: "star6",
-  wedgeEllipseCallout: "callout",
+  star10: "star8",
+  star12: "star8",
+  star16: "star8",
+  star24: "star8",
+  star32: "star8",
   wedgeRoundRectCallout: "callout",
   borderCallout1: "callout",
-  flowChartConnector: "ellipse",
+  borderCallout2: "callout",
+  borderCallout3: "callout",
+  accentCallout1: "callout",
+  cloudCallout: "cloud",
+  flowChartAlternateProcess: "roundRect",
   flowChartPredefinedProcess: "flowChartProcess",
-  flowChartInputOutput: "parallelogram",
-  flowChartDocument: "flowChartProcess",
+  flowChartInternalStorage: "flowChartProcess",
+  flowChartManualOperation: "trapezoid",
+  flowChartManualInput: "parallelogram",
+  flowChartMagneticDisk: "cylinder",
+  flowChartMagneticDrum: "cylinder",
+  flowChartOffpageConnector: "flowChartDocument",
+  flowChartMerge: "triangle",
+  flowChartExtract: "triangle",
+  flowChartSort: "diamond",
+  flowChartOr: "flowChartConnector",
+  flowChartSummingJunction: "flowChartConnector",
+  flowChartDelay: "flowChartTerminator",
+  flowChartDisplay: "flowChartTerminator",
+  flowChartPunchedTape: "flowChartDocument",
   actionButtonBlank: "rect",
+  rightArrowCallout: "arrowRight",
+  leftArrowCallout: "arrowLeft",
+  upArrowCallout: "arrowUp",
+  downArrowCallout: "arrowDown",
+  stripedRightArrow: "arrowRight",
+  curvedRightArrow: "arrowRight",
+  curvedLeftArrow: "arrowLeft",
+  curvedUpArrow: "arrowUp",
+  curvedDownArrow: "arrowDown",
+  bentUpArrow: "bentArrow",
+  uturnArrow: "bentArrow",
+  leftUpArrow: "quadArrow",
+  quadArrowCallout: "quadArrow",
+  leftRightUpArrow: "quadArrow",
+  halfFrame: "frame",
+  corner: "frame",
+  bevel: "plaque",
+  can: "cylinder",
+  cube: "rect",
+  blockArc: "donut",
+  chord: "pie",
+  arc: "pie",
+  noSmoking: "donut",
+  irregularSeal1: "star8",
+  irregularSeal2: "star8",
+  seal: "star8",
+  mathMultiply: "cross",
+  diagStripe: "rightTriangle",
 }
 
 interface ChartSpec {
@@ -1232,6 +1283,12 @@ function fillOf(node: Element, spPr: Element | null, theme: Record<string, strin
 /**
  * A linear gradient fill, shared by slide backgrounds and shapes. OOXML angles are in
  * 60000ths of a degree and stop positions in 1000ths of a percent.
+ *
+ * The angle is turned a quarter: the editor stores what CSS means, and CSS measures a
+ * gradient clockwise from straight up while OOXML measures it clockwise from the positive
+ * x axis. Carrying the OOXML number through unchanged made every imported gradient run
+ * ninety degrees off from the deck it came from — invisible while gradients exported as a
+ * flat average, and plainly wrong the moment they export as gradients again.
  */
 function gradientOf(
   node: Element | null,
@@ -1246,8 +1303,9 @@ function gradientOf(
     }))
     .sort((a, b) => a.pos - b.pos)
   if (stops.length < 2) return undefined
-  const angle = Number(first(node, "a:lin")?.getAttribute("ang") ?? 0) / 60000
-  return { type: "linear", rotate: Math.round(angle), stops }
+  const isRadial = !!first(node, "a:path")
+  const rotate = cssAngle(Number(first(node, "a:lin")?.getAttribute("ang") ?? 0))
+  return { type: isRadial ? "radial" : "linear", rotate, stops }
 }
 
 /**

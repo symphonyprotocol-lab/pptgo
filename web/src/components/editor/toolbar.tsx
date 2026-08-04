@@ -329,7 +329,9 @@ export function Toolbar({
             </Button>
           </PopoverTrigger>
           <PopoverContent className="w-72" align="start">
-            <div className="grid grid-cols-6 gap-1">
+            {/* the registry is long enough now that the grid has to scroll rather than
+                run off the bottom of a laptop screen */}
+            <div className="grid max-h-72 grid-cols-6 gap-1 overflow-y-auto">
               {SHAPE_LIST.map((shape) => (
                 <button
                   key={shape.key}

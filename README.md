@@ -40,13 +40,13 @@ npm run dev        # http://localhost:3000
 
 | | |
 |---|---|
-| **Elements** | text, image, shape (28 preset geometries + freehand), line, table, chart (bar / column / line / area / scatter / pie / doughnut / radar), video, audio, LaTeX formula |
+| **Elements** | text, image, shape (47 preset geometries + freehand), line, table, chart (bar / column / line / area / scatter / pie / doughnut / radar), video, audio, LaTeX formula |
 | **Canvas** | drag, 8-way resize with rotation compensation, rotate, marquee + multi-select, group/ungroup — groups scale and rotate as a unit — snap guides, grid, ruler, zoom, right-click menu, lock, double-click to edit text or table cells in place |
 | **Slides** | thumbnail rail, reorder by drag, duplicate/delete, sections, background (solid / gradient / image, applicable to all), speaker notes, transitions, per-element animations |
 | **Editing** | property panel per element type, layer panel, z-order, align, distribute, format painter, hyperlinks, inline rich text (bold / colour / highlight / lists / links / sub-superscript), image crop and tint, shape gradients, shadows, table merge/split, chart data editing, undo/redo, system clipboard, find & replace, keyboard shortcuts |
 | **Present** | animation stepping, transitions, pen / highlighter / eraser / laser / blackboard, timer, autoplay, thumbnail navigation, notes, fullscreen, media playback |
 | **Mobile** | the canvas runs on pointer events throughout, so mouse, touch and stylus share one path; pinch to zoom, side panels fold into drawers, swipe to page in present mode |
-| **Persistence** | IndexedDB autosave, import `.pptx` and JSON, export `.pptx` / PNG / PDF / JSON |
+| **Persistence** | IndexedDB autosave, import `.pptx` and JSON, export `.pptx` / PNG / PDF / JSON — the `.pptx` carries native gradients, custom geometry, transitions and animations |
 | **Accounts** | Google sign-in, decks autosaved to object storage, dashboard with thumbnails |
 | **Language** | 中文 / English, switchable from the landing page header; the choice is a cookie, so the server renders the first byte in the right language instead of swapping after hydration |
 
@@ -55,7 +55,8 @@ npm run dev        # http://localhost:3000
 | [`web/src/types/slides.ts`](web/src/types/slides.ts) | slide + element data model |
 | [`web/src/store/editor.ts`](web/src/store/editor.ts) | zustand store: slides, selection, history, clipboard, tables, animations |
 | [`web/src/lib/`](web/src/lib) | canvas constants, shape library, geometry, snapping, HTML sanitizing, colour, rich text, storage |
-| [`web/src/lib/export.ts`](web/src/lib/export.ts) · [`import-pptx.ts`](web/src/lib/import-pptx.ts) | PPTX out and in |
+| [`web/src/lib/export.ts`](web/src/lib/export.ts) · [`pptx-patch.ts`](web/src/lib/pptx-patch.ts) · [`import-pptx.ts`](web/src/lib/import-pptx.ts) | PPTX out and in |
+| [`web/src/lib/ooxml-*.ts`](web/src/lib/) · [`svg-path.ts`](web/src/lib/svg-path.ts) | the OOXML fragments pptxgenjs cannot write: gradients, custom geometry, transitions, timing |
 | [`web/src/components/editor/`](web/src/components/editor) | toolbar, slide list, canvas, property panel, layer panel, present view |
 | [`web/src/auth.ts`](web/src/auth.ts) · [`src/db/`](web/src/db) | Auth.js v5 (Google only) and the Drizzle schema |
 | [`web/src/lib/decks.ts`](web/src/lib/decks.ts) · [`s3.ts`](web/src/lib/s3.ts) | deck data access with ownership checks, object-storage client |
@@ -65,11 +66,17 @@ The canvas is a fixed 1000 × 562.5 coordinate space (16:9), CSS-scaled to fit. 
 1000 units to 10 inches, so a 24px font becomes ~17pt in PowerPoint. Importing a deck that is not
 16:9 scales it uniformly and centres it rather than stretching it.
 
-Two things worth knowing: the editor is loaded with `next/dynamic({ ssr: false })` — element ids
-are generated at runtime, so server rendering would always mismatch on hydration. And gradients
-have no pptxgenjs equivalent, so they export as the average of their stops — the shape stays a
-native, recolourable shape instead of being flattened to an image. Image filters, freehand
-strokes and formulas *are* rasterised on export, because OOXML has no way to express them.
+Two things worth knowing. The editor is loaded with `next/dynamic({ ssr: false })` — element ids
+are generated at runtime, so server rendering would always mismatch on hydration. And export
+happens in two passes: pptxgenjs writes what it can, then
+[`pptx-patch.ts`](web/src/lib/pptx-patch.ts) reopens the package it produced and writes in the
+four things it has no way to express — gradients as `a:gradFill` rather than the average of
+their stops, bespoke contours as `a:custGeom` rather than a picture of themselves, and slide
+transitions and per-element animations as `p:transition` and `p:timing`, which pptxgenjs does
+not emit at all. Each element is placed carrying a marker in its name, which is how a shape in
+the finished file is matched back to the element it came from; the marker is replaced with the
+element's real name on the way past. Image filters and formulas are still rasterised, because
+OOXML genuinely has no way to say them.
 
 **The logo is a 16:9 frame with a resize handle on its corner.** The proportion is the
 app's own coordinate space, so the outline reads as a slide rather than a generic box, and
@@ -100,9 +107,11 @@ sits in its own pool of light, and everything drawn *inside* a slide uses fixed 
 rather than tokens, because a slide is the user's document rather than a surface the app is
 entitled to repaint.
 
-`npm test` runs the vitest suite — 188 cases covering sanitizing, geometry, rich-text runs,
-deck migration, locale negotiation, the store, plus PPTX export, PPTX import, and an
-export→import round trip that generates and re-parses a real file.
+`npm test` runs the vitest suite — 394 cases covering sanitizing, geometry, SVG path data,
+rich-text runs, deck migration, locale negotiation, the store, plus PPTX export, PPTX import,
+and an export→import round trip that generates and re-parses a real file. The export tests read
+the finished archive rather than pptxgenjs's draft of it, because half the mapping is written
+by the patch pass.
 
 More detail in [`web/README.md`](web/README.md).
 
