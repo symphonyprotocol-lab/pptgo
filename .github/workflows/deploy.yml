@@ -78,6 +78,15 @@ jobs:
   deploy:
     needs: image
     runs-on: ubuntu-latest
+    # `packages: read` because the token this job hands the server is what pulls the image,
+    # and the workflow-level `permissions:` block above replaces the token's default scopes
+    # rather than adding to them — without this line the deploy token can read the
+    # repository and nothing else. It fails late and unhelpfully: `docker login ghcr.io`
+    # accepts any credential without checking what it can reach, so the login step goes
+    # green and the 403 only lands on the pull, one step later.
+    permissions:
+      contents: read
+      packages: read
     environment:
       name: production
       url: ${{ vars.PUBLIC_URL || 'https://pptgo.dev' }}
