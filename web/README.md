@@ -32,6 +32,8 @@ npm test        # vitest
 | `src/store/editor.ts` | zustand store：幻灯片、选区、撤销重做、剪贴板、表格操作、动画 |
 | `src/lib/` | 画布常量、形状库、几何、吸附、消毒、颜色、富文本、动画、存储 |
 | `src/lib/export.ts` | PPTX 导出（[pptxgenjs](https://github.com/gitbrent/PptxGenJS)） |
+| `src/lib/pptx-patch.ts` | 导出第二遍：回填 pptxgenjs 写不出的渐变、自定义几何、切换与动画 |
+| `src/lib/ooxml-fill.ts` · `ooxml-geometry.ts` · `ooxml-timing.ts` · `svg-path.ts` | 上述四类 OOXML 片段的构造，以及 SVG path 解析 |
 | `src/lib/import-pptx.ts` | PPTX 导入（jszip + DOMParser 解析 OOXML） |
 | `src/lib/export-media.tsx` | 图片（PNG/ZIP）与 PDF（打印）导出 |
 | `src/components/editor/` | 工具栏、页面列表、画布、属性面板、图层面板、放映视图 |

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import JSZip from "jszip"
-import { buildPptx } from "./export"
+import { writePptx } from "./export"
 import { tint } from "./table-theme"
 import {
   createChartElement,
@@ -20,12 +20,14 @@ import type { Deck } from "@/types/slides"
 const PNG =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
 
-/** Generates the file and unzips it so assertions can look at the real OOXML. */
-async function renderDeck(deck: Deck) {
-  const pptx = await buildPptx(deck)
-  const base64 = (await pptx.write({ outputType: "base64" })) as string
-  const zip = await JSZip.loadAsync(base64, { base64: true })
-  const slideXml = await zip.file("ppt/slides/slide1.xml")!.async("string")
+/**
+ * Generates the file and unzips it so assertions can look at the real OOXML. This is the
+ * whole of export, patch pass included — half the mapping lives there, so a test that
+ * stopped at pptxgenjs would be reading a draft rather than the file a user gets.
+ */
+async function renderDeck(deck: Deck, slideNumber = 1) {
+  const zip = await JSZip.loadAsync(await writePptx(deck))
+  const slideXml = await zip.file(`ppt/slides/slide${slideNumber}.xml`)!.async("string")
   return { zip, slideXml }
 }
 
@@ -96,7 +98,7 @@ describe("exportPptx", () => {
     expect(slideXml).toContain("alpha")
   })
 
-  it("flattens a gradient fill instead of dropping the shape's colour", async () => {
+  it("writes a shape's gradient as a real gradient rather than an average colour", async () => {
     const deck: Deck = {
       ...createDeck(),
       slides: [
@@ -118,10 +120,16 @@ describe("exportPptx", () => {
       ],
     }
     const { slideXml } = await renderDeck(deck)
-    expect(slideXml).toContain("808080")
+    expect(slideXml).toContain("<a:gradFill")
+    expect(slideXml).toContain('<a:gs pos="0"><a:srgbClr val="000000"/></a:gs>')
+    expect(slideXml).toContain('<a:gs pos="100000"><a:srgbClr val="FFFFFF"/></a:gs>')
+    // the average is what the shape used to export as, and must be gone rather than beside it
+    expect(slideXml).not.toContain("808080")
+    // 0deg in CSS points straight up, which is three quarters of a turn in OOXML's reckoning
+    expect(slideXml).toContain('<a:lin ang="16200000"')
   })
 
-  it("writes a gradient background as its average colour rather than white", async () => {
+  it("writes a gradient background as a gradient rather than an average colour", async () => {
     const deck: Deck = {
       ...createDeck(),
       slides: [
@@ -142,7 +150,8 @@ describe("exportPptx", () => {
       ],
     }
     const { slideXml } = await renderDeck(deck)
-    expect(slideXml).toContain("808080")
+    expect(slideXml).toMatch(/<p:bgPr><a:gradFill/)
+    expect(slideXml).not.toContain("808080")
   })
 
   it("exports shadows and outlines", async () => {
@@ -284,7 +293,7 @@ describe("freehand shapes", () => {
       [220, 110],
     ])!
 
-  // Without a rasteriser the placeholder must stay invisible. Omitting the fill entirely
+  // The stroke is the drawing, so the interior must stay empty. Omitting the fill entirely
   // would let PowerPoint paint a themed block where the sketch should be.
   it("does not fall back to a solid rectangle", async () => {
     const deck: Deck = { ...createDeck(), slides: [createSlide({ elements: [stroke()] })] }
@@ -292,6 +301,40 @@ describe("freehand shapes", () => {
     expect(slideXml).toContain("<p:sp>")
     const fill = slideXml.match(/<a:solidFill><a:srgbClr val="FFFFFF">(.*?)<\/a:srgbClr>/)
     expect(fill?.[1]).toContain('<a:alpha val="0"/>')
+  })
+
+  it("keeps its contour as editable geometry rather than a picture", async () => {
+    const deck: Deck = { ...createDeck(), slides: [createSlide({ elements: [stroke()] })] }
+    const { zip, slideXml } = await renderDeck(deck)
+    expect(slideXml).toContain("<a:custGeom>")
+    expect(slideXml).toContain("<a:quadBezTo>")
+    expect(slideXml).not.toContain("<a:prstGeom")
+    // an open stroke that PowerPoint is allowed to fill closes itself into a blob
+    expect(slideXml).toContain('fill="none"')
+    expect(zip.file(/ppt\/media\//)).toHaveLength(0)
+  })
+
+  it("converts an arc into curves the geometry can carry", async () => {
+    const element = stroke()
+    element.shapeKey = "custom"
+    element.path = "M 0 100 A 100 100 0 0 1 200 100 Z"
+    element.fill = "#3366ff"
+    const deck: Deck = { ...createDeck(), slides: [createSlide({ elements: [element] })] }
+    const { slideXml } = await renderDeck(deck)
+    expect(slideXml).toContain("<a:custGeom>")
+    expect(slideXml).toContain("<a:cubicBezTo>")
+    expect(slideXml).toContain("<a:close/>")
+    // a filled shape must not be told to leave its interior alone
+    expect(slideXml).not.toContain('fill="none"')
+  })
+
+  it("carries the text written inside a custom shape", async () => {
+    const element = stroke()
+    element.text = { ...element.text, content: "annotation" }
+    const deck: Deck = { ...createDeck(), slides: [createSlide({ elements: [element] })] }
+    const { slideXml } = await renderDeck(deck)
+    expect(slideXml).toContain("<a:custGeom>")
+    expect(slideXml).toContain("annotation")
   })
 
   it("keeps its own outline colour", async () => {
@@ -340,6 +383,130 @@ describe("media and formulas", () => {
     }
     const { slideXml } = await renderDeck(deck)
     expect(slideXml).toContain("E = mc^2")
+  })
+})
+
+describe("transitions and animations", () => {
+  const animated = (animations: Deck["slides"][number]["animations"]) => {
+    const element = createShapeElement("rect")
+    return {
+      ...createDeck(),
+      slides: [
+        createSlide({
+          elements: [element],
+          animations: animations?.map((a) => ({ ...a, elId: element.id })),
+        }),
+      ],
+    } satisfies Deck
+  }
+
+  it("writes a slide transition", async () => {
+    const deck: Deck = { ...createDeck(), slides: [createSlide({ transition: "slideX" })] }
+    const { slideXml } = await renderDeck(deck)
+    expect(slideXml).toContain("<p:transition")
+    expect(slideXml).toContain('<p:push dir="l"/>')
+    // schema order: the transition follows the colour map override, never precedes it
+    expect(slideXml.indexOf("<p:clrMapOvr")).toBeLessThan(slideXml.indexOf("<p:transition"))
+  })
+
+  /**
+   * OOXML states these as ordered sequences rather than sets, and PowerPoint reads a
+   * misplaced child as a damaged file — it opens with a repair prompt and drops the slide.
+   * Both places the patch pass inserts into are checked here.
+   */
+  it("leaves every patched node in the order its schema states", async () => {
+    const stroke = freehandElement([
+      [10, 10],
+      [80, 60],
+      [140, 20],
+    ])!
+    stroke.fill = "#123456"
+    stroke.gradient = {
+      type: "radial",
+      rotate: 0,
+      stops: [
+        { pos: 0, color: "#123456" },
+        { pos: 100, color: "#654321" },
+      ],
+    }
+    const deck: Deck = {
+      ...createDeck(),
+      slides: [createSlide({ elements: [stroke], transition: "fade" })],
+    }
+    const { slideXml } = await renderDeck(deck)
+
+    const at = (tag: string) => slideXml.indexOf(tag)
+    // p:spPr is xfrm, then geometry, then fill, then line
+    expect(at("<a:xfrm")).toBeLessThan(at("<a:custGeom>"))
+    expect(at("<a:custGeom>")).toBeLessThan(at("<a:gradFill"))
+    // `<a:ln ` with the space, because the path data is full of `<a:lnTo>`
+    expect(at("<a:gradFill")).toBeLessThan(at("<a:ln w="))
+    // p:sld is cSld, clrMapOvr, transition, timing
+    expect(at("</p:cSld>")).toBeLessThan(at("<p:clrMapOvr"))
+    expect(at("<p:clrMapOvr")).toBeLessThan(at("<p:transition"))
+    expect(slideXml.trimEnd().endsWith("</p:sld>")).toBe(true)
+  })
+
+  it("writes nothing for a slide with no transition", async () => {
+    const { slideXml } = await renderDeck({ ...createDeck(), slides: [createSlide()] })
+    expect(slideXml).not.toContain("<p:transition")
+    expect(slideXml).not.toContain("<p:timing")
+  })
+
+  it("targets the animated element's own shape id", async () => {
+    const deck = animated([
+      { id: "a1", elId: "", effect: "fadeIn", type: "in", duration: 600, trigger: "click" },
+    ])
+    const { slideXml } = await renderDeck(deck)
+    const spid = slideXml.match(/<p:cNvPr id="(\d+)" name="Rectangle"/)?.[1]
+    expect(spid).toBeTruthy()
+    expect(slideXml).toContain("<p:timing>")
+    expect(slideXml).toContain(`<p:spTgt spid="${spid}"/>`)
+    expect(slideXml).toContain('presetID="10" presetClass="entr"')
+    expect(slideXml).toContain('nodeType="clickEffect"')
+    expect(slideXml).toContain('dur="600"')
+  })
+
+  it("groups a with-previous animation into the click that starts it", async () => {
+    const deck = animated([
+      { id: "a1", elId: "", effect: "slideInUp", type: "in", duration: 500, trigger: "click" },
+      { id: "a2", elId: "", effect: "pulse", type: "attention", duration: 500, trigger: "auto" },
+    ])
+    const { slideXml } = await renderDeck(deck)
+    expect(slideXml).toContain('nodeType="clickEffect"')
+    expect(slideXml).toContain('nodeType="withEffect"')
+    // one click step, so exactly one node waits for the click
+    expect(slideXml.match(/delay="indefinite"/g)).toHaveLength(1)
+    // fly in from the bottom edge, which OOXML's compass bitmask calls 4
+    expect(slideXml).toContain('presetID="2" presetClass="entr" presetSubtype="4"')
+  })
+
+  it("gives every timing node an id of its own", async () => {
+    const deck = animated([
+      { id: "a1", elId: "", effect: "rotateIn", type: "in", duration: 500, trigger: "click" },
+      { id: "a2", elId: "", effect: "shake", type: "attention", duration: 800, trigger: "click" },
+    ])
+    const { slideXml } = await renderDeck(deck)
+    const timing = slideXml.slice(slideXml.indexOf("<p:timing>"))
+    const ids = [...timing.matchAll(/<p:cTn id="(\d+)"/g)].map((m) => m[1])
+    expect(ids.length).toBeGreaterThan(8)
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  it("drops an animation whose element never reached the slide", async () => {
+    const deck: Deck = {
+      ...createDeck(),
+      slides: [
+        createSlide({
+          elements: [],
+          animations: [
+            { id: "a1", elId: "gone", effect: "fadeIn", type: "in", duration: 500, trigger: "click" },
+          ],
+        }),
+      ],
+    }
+    const { slideXml } = await renderDeck(deck)
+    expect(slideXml).not.toContain("<p:timing")
   })
 })
 

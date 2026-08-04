@@ -324,7 +324,8 @@ describe("importPptx", () => {
     const deck = await importPptx(await buildPptx([slideDoc("", bg)]))
     expect(deck.slides[0].background.type).toBe("gradient")
     expect(deck.slides[0].background.gradient?.stops).toHaveLength(2)
-    expect(deck.slides[0].background.gradient?.rotate).toBe(90)
+    // a quarter turn in OOXML points the gradient down the slide, which CSS calls 180deg
+    expect(deck.slides[0].background.gradient?.rotate).toBe(180)
   })
 
   it("imports a table with its column widths", async () => {

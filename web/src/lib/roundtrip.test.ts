@@ -11,6 +11,7 @@ import {
   createTableElement,
   createTextElement,
 } from "./factory"
+import { freehandElement } from "./freehand"
 import { htmlToPlainText } from "./sanitize"
 import { translator } from "./i18n/translate"
 import type { ChartElement, Deck, ShapeElement, TableElement } from "@/types/slides"
@@ -71,6 +72,78 @@ describe("pptx round trip", () => {
     expect(shape.type).toBe("shape")
     expect(shape.shapeKey).toBe("ellipse")
     expect(shape.fill?.toUpperCase()).toBe("#FF0000")
+  })
+
+  it("keeps a gradient a gradient, at the angle it was drawn at", async () => {
+    const deck: Deck = {
+      ...createDeck(zh),
+      slides: [
+        createSlide({
+          elements: [
+            createShapeElement("rect", {
+              fill: "#000000",
+              gradient: {
+                type: "linear",
+                rotate: 135,
+                stops: [
+                  { pos: 0, color: "#112233" },
+                  { pos: 100, color: "#445566" },
+                ],
+              },
+            }),
+          ],
+        }),
+      ],
+    }
+    const shape = (await roundTrip(deck)).slides[0].elements[0] as ShapeElement
+    expect(shape.gradient?.type).toBe("linear")
+    expect(shape.gradient?.stops.map((s) => s.color.toUpperCase())).toEqual(["#112233", "#445566"])
+    // the quarter turn between CSS and OOXML has to be applied in both directions, or every
+    // trip through a file rotates the deck's gradients another ninety degrees
+    expect(shape.gradient?.rotate).toBe(135)
+  })
+
+  it("keeps a gradient background rather than settling for one of its colours", async () => {
+    const deck: Deck = {
+      ...createDeck(zh),
+      slides: [
+        createSlide({
+          background: {
+            type: "gradient",
+            color: "#ffffff",
+            gradient: {
+              type: "linear",
+              rotate: 0,
+              stops: [
+                { pos: 0, color: "#ff0000" },
+                { pos: 100, color: "#0000ff" },
+              ],
+            },
+          },
+        }),
+      ],
+    }
+    const background = (await roundTrip(deck)).slides[0].background
+    expect(background.type).toBe("gradient")
+    expect(background.gradient?.stops).toHaveLength(2)
+    expect(background.gradient?.rotate).toBe(0)
+  })
+
+  it("brings a freehand stroke back as a shape rather than a picture of one", async () => {
+    const stroke = freehandElement([
+      [100, 100],
+      [160, 140],
+      [220, 110],
+    ])!
+    const deck: Deck = { ...createDeck(zh), slides: [createSlide({ elements: [stroke] })] }
+    const result = (await roundTrip(deck)).slides[0].elements[0]
+
+    expect(result.type).toBe("shape")
+    if (result.type === "shape") {
+      // the contour survives as path data, which is what makes it editable on the far side
+      expect(result.path).toMatch(/^M /)
+      expect(result.path.length).toBeGreaterThan(10)
+    }
   })
 
   it("keeps geometry within a unit of where it started", async () => {

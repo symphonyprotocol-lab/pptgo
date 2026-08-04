@@ -6,6 +6,8 @@ import { formulaToPng } from "./formula"
 import { bakeImage } from "./image"
 import { svgToPng } from "./raster"
 import { htmlToRuns, primaryFont, type RunDefaults } from "./rich-text"
+import { exportMarker, patchPptx, xmlAttr } from "./pptx-patch"
+import { shapeGeometryXml } from "./ooxml-geometry"
 import { elementLabel } from "./element-label"
 import { cellBackground, cellTextColor, isHeaderRow } from "./table-theme"
 import { fallbackTranslate, type Translate } from "./i18n/translate"
@@ -45,14 +47,6 @@ export function triggerDownload(blob: Blob, filename: string) {
   // give the browser a tick to start the download before the blob disappears
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
-
-/** Escapes a value going into a double-quoted XML attribute. */
-export const xmlAttr = (value: string) =>
-  value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
 
 const dashType = (style: string) =>
   style === "dashed" ? "dash" : style === "dotted" ? "sysDot" : "solid"
@@ -135,93 +129,24 @@ export async function exportPptx(deck: Deck, t: Translate = fallbackTranslate) {
 }
 
 /**
- * The finished .pptx bytes, with the East Asian faces put back.
+ * The finished .pptx bytes.
  *
- * pptxgenjs takes a single `fontFace` per run and writes it into `a:latin`, `a:ea` and
- * `a:cs` alike, so a Chinese deck came back out with its Chinese font replaced by the
- * Latin one — the import fix that recovered 黑体 / 宋体 / 楷体 would have been undone by
- * the first export. The tags are already in the generated XML, so this only rewrites the
- * `a:ea` value; nothing about the document's structure changes.
+ * pptxgenjs writes what it can, and then the package is reopened and finished: gradients,
+ * custom contours, transitions, animations and the East Asian typefaces are all things it
+ * has no way to express. See [`pptx-patch.ts`](./pptx-patch.ts).
  */
 export async function writePptx(deck: Deck, t: Translate = fallbackTranslate): Promise<ArrayBuffer> {
   const pptx = await buildPptx(deck, t)
   const raw = (await pptx.write({ outputType: "arraybuffer" })) as ArrayBuffer
-
-  const eastAsian = eastAsianByLatin(deck)
-  if (!eastAsian.size) return raw
-
-  const { default: JSZipCtor } = await import("jszip")
-  const zip = await JSZipCtor.loadAsync(raw)
-  const slides = Object.keys(zip.files).filter((name) =>
-    /^ppt\/slides\/slide\d+\.xml$/.test(name),
-  )
-
-  for (const name of slides) {
-    const xml = await zip.file(name)!.async("string")
-    // keyed off the `a:latin` value sitting in the same rPr, so each run is matched to the
-    // pairing it actually came from rather than to a document-wide guess
-    const patched = xml.replace(
-      /(<a:latin typeface="([^"]*)"[^>]*\/>\s*<a:ea typeface=")([^"]*)(")/g,
-      (whole, head: string, latin: string, _current: string, tail: string) => {
-        const ea = eastAsian.get(latin)
-        // the name is a deck value being written into XML, so it is escaped like any other
-        return ea ? `${head}${xmlAttr(ea)}${tail}` : whole
-      },
-    )
-    if (patched !== xml) zip.file(name, patched)
-  }
-
-  return zip.generateAsync({ type: "arraybuffer" })
+  return patchPptx(raw, deck, t)
 }
-
-/** Generic families are CSS fallbacks, not typefaces, and must never reach the file. */
-const GENERIC_FAMILY = /^(sans-serif|serif|monospace|cursive|fantasy|system-ui|ui-[a-z-]+)$/i
-
-const facesOf = (stack: string) =>
-  stack
-    .split(",")
-    .map((part) => part.replace(/['"]/g, "").trim())
-    .filter((part) => part && !GENERIC_FAMILY.test(part))
 
 /**
- * Latin face -> the East Asian face the deck pairs it with, harvested from the font
- * stacks the importer built. A stack only carries a second family when the source set
- * `a:ea`, so its presence is the signal.
+ * The pptxgenjs half of the mapping, split out so it can be exercised on its own.
  *
- * One Latin face is paired with one East Asian face in every real deck examined — a
- * designer picks 黑体 for headings and 宋体 for body, and the Latin faces differ along
- * with them. Should a deck ever break that, the most frequent pairing wins, which keeps
- * the common case right instead of dropping both.
+ * Everything placed here is named with its element's export marker, which is what the
+ * patch pass matches a shape back to its element by; the marker never survives that pass.
  */
-function eastAsianByLatin(deck: Deck): Map<string, string> {
-  const tally = new Map<string, Map<string, number>>()
-
-  const record = (stack: string | undefined) => {
-    if (!stack) return
-    const [latin, ea] = facesOf(stack)
-    if (!latin || !ea || latin === ea) return
-    const byEa = tally.get(latin) ?? new Map<string, number>()
-    byEa.set(ea, (byEa.get(ea) ?? 0) + 1)
-    tally.set(latin, byEa)
-  }
-
-  for (const slide of deck.slides) {
-    for (const el of slide.elements) {
-      if (el.type === "text") record(el.fontFamily)
-      else if (el.type === "shape") record(el.text.fontFamily)
-      else if (el.type === "table") record(el.fontFamily)
-    }
-  }
-
-  const winners = new Map<string, string>()
-  for (const [latin, byEa] of tally) {
-    const best = [...byEa].sort((a, b) => b[1] - a[1])[0]
-    if (best) winners.set(latin, best[0])
-  }
-  return winners
-}
-
-/** Split out from `exportPptx` so the whole mapping can be exercised without a download. */
 export async function buildPptx(deck: Deck, t: Translate = fallbackTranslate): Promise<Pptx> {
   const { default: PptxGenJSCtor } = await import("pptxgenjs")
 
@@ -236,32 +161,33 @@ export async function buildPptx(deck: Deck, t: Translate = fallbackTranslate): P
     const slide = pptx.addSlide()
     applyBackground(slide, slideData)
 
-    for (const el of slideData.elements) {
+    for (const [index, el] of slideData.elements.entries()) {
+      const marker = exportMarker(index)
       switch (el.type) {
         case "text":
-          addText(slide, el, slideNumbers)
+          addText(slide, el, marker, slideNumbers)
           break
         case "shape":
-          await addShape(slide, el, slideNumbers, t)
+          await addShape(slide, el, marker, slideNumbers, t)
           break
         case "image":
-          await addImage(slide, el, slideNumbers, t)
+          await addImage(slide, el, marker, slideNumbers, t)
           break
         case "line":
-          addLine(slide, el)
+          addLine(slide, el, marker)
           break
         case "table":
-          addTable(slide, el)
+          addTable(slide, el, marker)
           break
         case "chart":
-          addChart(slide, el, t)
+          addChart(slide, el, marker, t)
           break
         case "video":
         case "audio":
-          addMedia(slide, el)
+          addMedia(slide, el, marker)
           break
         case "formula":
-          await addFormula(slide, el)
+          await addFormula(slide, el, marker)
           break
       }
     }
@@ -287,12 +213,18 @@ function applyBackground(slide: PptxSlide, slideData: Slide) {
   slide.background = { color: toHex(background.color, "FFFFFF") }
 }
 
-function addText(slide: PptxSlide, el: TextElement, slideNumbers: Map<string, number>) {
+function addText(
+  slide: PptxSlide,
+  el: TextElement,
+  marker: string,
+  slideNumbers: Map<string, number>,
+) {
   const link = hyperlinkOf(el, slideNumbers)
   const runs = withHyperlink(htmlToRuns(el.content, textDefaults(el)), link)
   if (!runs.length) return
   slide.addText(runs, {
     ...frameOf(el),
+    objectName: marker,
     align: el.align === "justify" ? "justify" : el.align,
     valign: el.vertical,
     // element opacity used to reach the fill only, so a half-faded text box exported with
@@ -316,8 +248,12 @@ function addText(slide: PptxSlide, el: TextElement, slideNumbers: Map<string, nu
   })
 }
 
-/** Renders a bespoke path to PNG — OOXML custom geometry is beyond what pptxgenjs emits. */
-async function addCustomShape(slide: PptxSlide, el: ShapeElement, t: Translate) {
+/**
+ * Renders a bespoke path to PNG. Custom geometry normally carries these shapes out
+ * natively; this is what is left when the path is not something we can convert, and a
+ * picture of the drawing beats a coloured rectangle where the drawing should be.
+ */
+async function addCustomShape(slide: PptxSlide, el: ShapeElement, marker: string, t: Translate) {
   const stroke = el.outline?.width ? el.outline : { width: 2, color: "#111827", style: "solid" }
   // every interpolated value below came out of a deck, so it is escaped rather than
   // trusted to be a colour: one `&` in a fill produced an SVG that would not parse, and
@@ -331,37 +267,55 @@ async function addCustomShape(slide: PptxSlide, el: ShapeElement, t: Translate) 
 
   const png = await svgToPng(svg, el.width, el.height)
   if (png) {
-    slide.addImage({ ...frameOf(el), data: png, altText: elementLabel(el, t) })
+    slide.addImage({ ...frameOf(el), objectName: marker, data: png, altText: elementLabel(el, t) })
     return
   }
-  // No rasteriser available. `{ type: "none" }` makes pptxgenjs omit the fill node entirely,
-  // which PowerPoint then fills from the theme — a solid block where a sketch should be.
-  // An explicitly transparent fill keeps the placeholder invisible.
+  // No rasteriser available either. `{ type: "none" }` makes pptxgenjs omit the fill node
+  // entirely, which PowerPoint then fills from the theme — a solid block where a sketch
+  // should be. An explicitly transparent fill keeps the placeholder invisible.
   slide.addShape("rect" as PptxGenJS.SHAPE_NAME, {
     ...frameOf(el),
+    objectName: marker,
     fill: { color: "FFFFFF", transparency: 100 },
     line: lineProps(el.outline?.width ? el.outline : { style: "solid", width: 2, color: "#111827" }),
   })
 }
 
+/**
+ * The solid fill a shape is written with.
+ *
+ * A gradient still goes in as the average of its stops; the patch pass replaces it with
+ * the real gradient, and what is left behind is the colour the shape falls back to if it
+ * ever cannot. A fill that is fully transparent has to be *stated* as one rather than
+ * omitted, for the same reason the placeholder above does.
+ */
+function shapeFill(el: ShapeElement) {
+  if (alphaOf(el.fill) === 0 && !el.gradient) return { color: "FFFFFF", transparency: 100 }
+  const color = el.gradient ? flattenGradient(el.gradient, toHex(el.fill)) : toHex(el.fill)
+  return { color, transparency: transparency(el.opacity) }
+}
+
 async function addShape(
   slide: PptxSlide,
   el: ShapeElement,
+  marker: string,
   slideNumbers: Map<string, number>,
   t: Translate,
 ) {
   const def = SHAPE_MAP.get(el.shapeKey)
-  if (!def) {
-    await addCustomShape(slide, el, t)
+  // A shape with no preset goes in as a plain rectangle and is given its real contour by
+  // the patch pass. Only a path that will not convert at all falls back to a picture.
+  const geometry = def ? null : shapeGeometryXml(el)
+  if (!def && !geometry) {
+    await addCustomShape(slide, el, marker, t)
     return
   }
-  const preset = def.preset as PptxGenJS.SHAPE_NAME
-  const fill = el.gradient
-    ? { color: flattenGradient(el.gradient, toHex(el.fill)) }
-    : { color: toHex(el.fill) }
+
+  const preset = (def?.preset ?? "rect") as PptxGenJS.SHAPE_NAME
   const shared = {
     ...frameOf(el),
-    fill: { ...fill, transparency: transparency(el.opacity) },
+    objectName: marker,
+    fill: shapeFill(el),
     line: lineProps(el.outline),
     shadow: shadowProps(el.shadow),
     flipH: el.flipH || undefined,
@@ -400,6 +354,7 @@ async function addShape(
 async function addImage(
   slide: PptxSlide,
   el: ImageElement,
+  marker: string,
   slideNumbers: Map<string, number>,
   t: Translate,
 ) {
@@ -419,6 +374,7 @@ async function addImage(
 
   slide.addImage({
     ...frameOf(el),
+    objectName: marker,
     data: isData ? src : undefined,
     path: isData ? undefined : src,
     altText: elementLabel(el, t),
@@ -444,7 +400,7 @@ const MEDIA_EXTENSION: Record<string, string> = {
   "audio/mp4": "m4a",
 }
 
-function addMedia(slide: PptxSlide, el: MediaElement) {
+function addMedia(slide: PptxSlide, el: MediaElement, marker: string) {
   const isData = el.src.startsWith("data:")
   // pptxgenjs cannot sniff the container from a data URI, so it is named explicitly
   const mime = isData ? (el.src.match(/^data:([^;,]+)/)?.[1] ?? "") : ""
@@ -452,6 +408,7 @@ function addMedia(slide: PptxSlide, el: MediaElement) {
 
   slide.addMedia({
     ...frameOf(el),
+    objectName: marker,
     type: el.type,
     data: isData ? el.src : undefined,
     path: isData ? undefined : el.src,
@@ -465,14 +422,15 @@ function addMedia(slide: PptxSlide, el: MediaElement) {
  * is embedded as a picture. If rasterising is unavailable the source is written as text,
  * which at least keeps the content editable.
  */
-async function addFormula(slide: PptxSlide, el: FormulaElement) {
+async function addFormula(slide: PptxSlide, el: FormulaElement, marker: string) {
   const png = await formulaToPng(el.latex, el.color, el.width, el.height)
   if (png) {
-    slide.addImage({ ...frameOf(el), data: png, altText: el.latex })
+    slide.addImage({ ...frameOf(el), objectName: marker, data: png, altText: el.latex })
     return
   }
   slide.addText(el.latex, {
     ...frameOf(el),
+    objectName: marker,
     color: toHex(el.color),
     fontSize: pt(el.height * 0.4),
     fontFace: "Courier New",
@@ -481,13 +439,14 @@ async function addFormula(slide: PptxSlide, el: FormulaElement) {
   })
 }
 
-function addLine(slide: PptxSlide, el: LineElement) {
+function addLine(slide: PptxSlide, el: LineElement, marker: string) {
   const [sx, sy] = el.start
   const [ex, ey] = el.end
   const left = Math.min(sx, ex)
   const top = Math.min(sy, ey)
 
   slide.addShape((el.curve ? "curvedConnector3" : "line") as PptxGenJS.SHAPE_NAME, {
+    objectName: marker,
     x: inch(el.left + left),
     y: inch(el.top + top),
     w: inch(Math.max(Math.abs(ex - sx), 1)),
@@ -506,7 +465,7 @@ function addLine(slide: PptxSlide, el: LineElement) {
   })
 }
 
-function addTable(slide: PptxSlide, el: TableElement) {
+function addTable(slide: PptxSlide, el: TableElement, marker: string) {
   const rows = el.rows.map((row, r) =>
     row
       .filter((cell) => !cell.merged)
@@ -533,6 +492,7 @@ function addTable(slide: PptxSlide, el: TableElement) {
 
   slide.addTable(rows, {
     ...frameOf(el),
+    objectName: marker,
     colW: el.colWidths.map((w) => inch(el.width * w)),
     rowH: el.rows.map(() => inch(el.height / Math.max(1, el.rows.length))),
     // imported tables carry the source deck's cell insets; without them PowerPoint's
@@ -557,7 +517,7 @@ const CHART_NAME_BY_TYPE: Record<ChartElement["chartType"], PptxGenJS.CHART_NAME
   radar: "radar",
 }
 
-function addChart(slide: PptxSlide, el: ChartElement, t: Translate) {
+function addChart(slide: PptxSlide, el: ChartElement, marker: string, t: Translate) {
   const isPie = el.chartType === "pie" || el.chartType === "doughnut"
   const type = CHART_NAME_BY_TYPE[el.chartType]
 
@@ -577,6 +537,7 @@ function addChart(slide: PptxSlide, el: ChartElement, t: Translate) {
 
   slide.addChart(type, data, {
     ...frameOf(el),
+    objectName: marker,
     barDir: el.chartType === "bar" ? "bar" : "col",
     chartColors: el.themeColors.map((c) => toHex(c)),
     showLegend: el.showLegend,
