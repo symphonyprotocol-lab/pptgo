@@ -84,6 +84,22 @@ describe("every layout in every theme", () => {
       expect(element.name).not.toBe("")
     }
   })
+
+  /**
+   * `roundRect` is one path stretched to whatever box it lands in, so its corner is a
+   * proportion of each side rather than a length. On a plate much wider than it is tall,
+   * that corner sweeps most of the way across the top and the shape reads as a lozenge.
+   * No layout may ask for one at a size where it does not survive.
+   */
+  it.each(cases)("%s / %s / %s never rounds a plate too flat to carry it", (preset, _l, _lang, spec) => {
+    for (const element of slideOf(spec, preset).elements) {
+      if (element.type !== "shape" || element.shapeKey !== "roundRect") continue
+      const ratio = Math.min(element.width, element.height) / Math.max(element.width, element.height)
+      expect(ratio, `${element.name} is ${element.width}×${element.height}`).toBeGreaterThanOrEqual(
+        1 / 3,
+      )
+    }
+  })
 })
 
 /**
