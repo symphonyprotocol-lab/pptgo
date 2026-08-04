@@ -26,13 +26,13 @@ export default async function TokensPage() {
   return (
     <main className="flex-1 bg-background text-foreground">
       <header className="border-b border-border">
-        <div className="mx-auto flex h-16 max-w-3xl items-center justify-between px-5 sm:px-8">
+        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-5 sm:px-8">
           <Wordmark href="/dashboard" />
           <UserMenu user={user} />
         </div>
       </header>
 
-      <div className="mx-auto max-w-3xl px-5 py-12 sm:px-8 lg:py-16">
+      <div className="mx-auto max-w-6xl px-5 py-12 sm:px-8 lg:py-16">
         <div className="border-b border-foreground/20 pb-6">
           <p className="font-mono text-[11px] tracking-[0.28em] text-primary uppercase">
             {t("tokens.kicker")}

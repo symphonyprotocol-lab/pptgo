@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { currentUser } from "@/auth"
 import {
   MAX_DECKS_PER_OWNER,
+  MAX_DECK_MB,
   MAX_REQUEST_BYTES,
   blankDeck,
   countDecks,
@@ -30,7 +31,7 @@ export async function POST(request: Request) {
   const body = await readJsonObject(request, MAX_REQUEST_BYTES)
   if (!body.ok) {
     return body.reason === "too-large"
-      ? NextResponse.json({ error: t("api.deckTooLarge") }, { status: 413 })
+      ? NextResponse.json({ error: t("api.deckTooLarge", { limit: MAX_DECK_MB }) }, { status: 413 })
       : NextResponse.json({ error: t("api.badJson") }, { status: 400 })
   }
 
@@ -43,7 +44,7 @@ export async function POST(request: Request) {
   if (!deck) return NextResponse.json({ error: t("api.badDeck") }, { status: 400 })
 
   const encoded = encodeDeck(deck)
-  if (!encoded) return NextResponse.json({ error: t("api.deckTooLarge") }, { status: 413 })
+  if (!encoded) return NextResponse.json({ error: t("api.deckTooLarge", { limit: MAX_DECK_MB }) }, { status: 413 })
 
   // an account that can create decks without limit is an account that can fill the bucket
   if ((await countDecks(user.id)) >= MAX_DECKS_PER_OWNER) {

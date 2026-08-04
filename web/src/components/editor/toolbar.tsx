@@ -64,7 +64,7 @@ import { exportImages, exportPdf } from "@/lib/export-media"
 import { formatBytes, importPptx } from "@/lib/import-pptx"
 import { SHAPE_LIST } from "@/lib/shapes"
 import { VIEWPORT_HEIGHT, VIEWPORT_WIDTH } from "@/lib/constants"
-import { MAX_DECK_BYTES } from "@/lib/deck-schema"
+import { EMBEDDED_RATIO, MAX_DECK_BYTES } from "@/lib/deck-schema"
 import { useT } from "@/lib/i18n/client"
 import { useEditor } from "@/store/editor"
 import type { DeckLibrary } from "@/lib/deck-storage"
@@ -113,9 +113,14 @@ function IconButton({
  * deck document, so these are budgets against `MAX_DECK_BYTES` — and the point of checking
  * here is that the alternative was letting someone drop in a 200MB video, work for twenty
  * minutes, and be told at the first autosave that none of it could be kept.
+ *
+ * Stated as a share of the document ceiling rather than as their own numbers, because a
+ * fixed budget stops meaning anything the moment the ceiling moves: a flat 20MB media
+ * allowance under a 20MB document was a file the editor accepted and could never store,
+ * since base64 costs a third on top before it is even weighed.
  */
-const MAX_IMAGE_BYTES = 10 * 1024 * 1024
-const MAX_MEDIA_BYTES = 20 * 1024 * 1024
+const MAX_IMAGE_BYTES = Math.floor(MAX_DECK_BYTES * 0.25 * EMBEDDED_RATIO)
+const MAX_MEDIA_BYTES = Math.floor(MAX_DECK_BYTES * 0.5 * EMBEDDED_RATIO)
 /**
  * A whole document rather than one asset, so it is the document ceiling itself. Holding a
  * lower number here refused files the app could store, and refused them by name — a 45MB

@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest"
-import { MAX_DECK_BYTES, blankDeck, encodeDeck, parseDeck } from "./deck-schema"
+import {
+  EMBEDDED_RATIO,
+  MAX_DECK_BYTES,
+  MAX_DECK_MB,
+  MAX_REQUEST_BYTES,
+  blankDeck,
+  encodeDeck,
+  parseDeck,
+} from "./deck-schema"
+import { messages } from "./i18n/messages"
+import { translator } from "./i18n/translate"
 import { VIEWPORT_HEIGHT, VIEWPORT_WIDTH } from "./constants"
 import type { Deck } from "@/types/slides"
 
@@ -83,5 +93,40 @@ describe("encodeDeck", () => {
     const deck = valid()
     deck.slides[0].notes = "y".repeat(1000)
     expect(encodeDeck(deck)).not.toBeNull()
+  })
+})
+
+describe("the size limits", () => {
+  it("states the ceiling in megabytes without restating the number", () => {
+    expect(MAX_DECK_MB * 1024 * 1024).toBe(MAX_DECK_BYTES)
+  })
+
+  /**
+   * The message used to carry a literal 25 while the ceiling was 50, so the app refused a
+   * deck at one size and named another. Every language has to name the real one.
+   */
+  it("names the real ceiling in every language it refuses in", () => {
+    for (const locale of Object.keys(messages) as (keyof typeof messages)[]) {
+      const text = translator(locale)("api.deckTooLarge", { limit: MAX_DECK_MB })
+      expect(text, locale).toContain(String(MAX_DECK_MB))
+      // an un-substituted placeholder is the other way this goes wrong
+      expect(text, locale).not.toContain("{")
+    }
+  })
+
+  it("leaves the request envelope room around a document at the ceiling", () => {
+    expect(MAX_REQUEST_BYTES).toBeGreaterThan(MAX_DECK_BYTES)
+  })
+
+  /**
+   * The invariant behind the per-asset budgets in the toolbar: a file is weighed before it
+   * is encoded, and base64 adds a third. A budget that ignores that is a file the editor
+   * accepts and can never store — which is exactly what a flat 20MB media allowance became
+   * once the document ceiling came down to 20MB.
+   */
+  it("keeps an embedded file under the ceiling once base64 has had its share", () => {
+    const largestAllowed = MAX_DECK_BYTES * EMBEDDED_RATIO
+    expect(largestAllowed / EMBEDDED_RATIO).toBeCloseTo(MAX_DECK_BYTES, 5)
+    expect(largestAllowed).toBeLessThan(MAX_DECK_BYTES)
   })
 })
