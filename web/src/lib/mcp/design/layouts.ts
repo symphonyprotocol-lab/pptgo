@@ -253,6 +253,25 @@ const textBox = (args: TextArgs): ElementSpec => ({
   ...(args.fill ? { fill: args.fill } : {}),
 })
 
+/**
+ * Below this ratio between a plate's sides, a rounded corner stops looking rounded.
+ *
+ * `roundRect` is one path authored in a 200×200 box and stretched to whatever box it lands
+ * in, so its corner is 12% of the width *and* 12% of the height — on a 430×52 band that is
+ * 52 units across and 6 units down, and the shape reads as a lozenge with a bulging edge
+ * rather than a bar with rounded corners. Squinting at a sweep of ratios, it holds together
+ * to about a third and falls apart below it.
+ *
+ * The renderer is where this really lives — it stretches a square viewBox — and fixing it
+ * there would change every shape in every deck, including hand-drawn ones and imported
+ * ones. So the layouts stay inside what the shape actually does, and stop asking for a
+ * corner at the sizes where it does not survive.
+ */
+const ROUNDABLE_RATIO = 1 / 3
+
+const roundable = (width: number, height: number) =>
+  Math.min(width, height) / Math.max(width, height) >= ROUNDABLE_RATIO
+
 const plate = (
   name: string,
   left: number,
@@ -264,7 +283,9 @@ const plate = (
 ): ElementSpec => ({
   type: "shape",
   name,
-  shapeKey: radius > 0 ? "roundRect" : "rect",
+  // `radius` says whether this theme rounds anything at all — it cannot say by how much,
+  // because the amount belongs to the stretched path rather than to us
+  shapeKey: radius > 0 && roundable(width, height) ? "roundRect" : "rect",
   left,
   top,
   width,
@@ -1204,7 +1225,8 @@ function comparison(
   ]
 
   const inner = cells[0].width - pad * 2
-  const room = CONTENT_HEIGHT - bandHeight - pad * 2
+  const bandTop = CONTENT_TOP + pad
+  const room = CONTENT_HEIGHT - bandHeight - pad * 3
   const size = fitStacks(
     [spec.left.points, spec.right.points],
     inner - 18,
@@ -1217,12 +1239,22 @@ function comparison(
     const cell = cells[index]
     out.push(
       plate(`${key}-panel`, cell.left, CONTENT_TOP, cell.width, CONTENT_HEIGHT, theme.colors.surface, theme.radius),
-      plate(`${key}-band`, cell.left, CONTENT_TOP, cell.width, bandHeight, fill, theme.radius),
+      /*
+        Inset rather than flush to the panel's top edge.
+
+        A band this wide and this short cannot carry a rounded corner — see `roundable` —
+        so it is a square-cornered bar, and a square corner laid over the panel's rounded
+        one hangs off the curve by the whole width of the curve. Pulling the band inside
+        the padding clears the corner outright, on a rounded theme and a square one alike.
+      */
+      plate(`${key}-band`, cell.left + pad, bandTop, inner, bandHeight, fill, theme.radius),
       textBox({
         name: `${key}-heading`,
-        left: cell.left + pad,
-        top: CONTENT_TOP,
-        width: inner,
+        // the same 18 the bullets below are indented by, so one left edge runs down the
+        // whole card instead of the heading missing it by four units
+        left: cell.left + pad + 18,
+        top: bandTop,
+        width: inner - 36,
         height: bandHeight,
         text: side.heading,
         size: theme.scale.subtitle,
@@ -1234,7 +1266,7 @@ function comparison(
       }),
     )
 
-    let y = CONTENT_TOP + bandHeight + pad
+    let y = bandTop + bandHeight + pad
     side.points.forEach((point, at) => {
       const height = Math.max(size * 1.45, estimateHeight(point, inner - 18, size, 1.45))
       out.push(
