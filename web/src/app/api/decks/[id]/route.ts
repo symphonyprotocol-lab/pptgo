@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { currentUser } from "@/auth"
 import {
+  MAX_DECK_MB,
   MAX_REQUEST_BYTES,
   deleteDeck,
   duplicateDeck,
@@ -57,7 +58,7 @@ export async function PUT(request: Request, { params }: Context) {
   const body = await readJsonObject(request, MAX_REQUEST_BYTES)
   if (!body.ok) {
     return body.reason === "too-large"
-      ? NextResponse.json({ error: t("api.deckTooLarge") }, { status: 413 })
+      ? NextResponse.json({ error: t("api.deckTooLarge", { limit: MAX_DECK_MB }) }, { status: 413 })
       : NextResponse.json({ error: t("api.badJson") }, { status: 400 })
   }
 
@@ -70,7 +71,7 @@ export async function PUT(request: Request, { params }: Context) {
   if (!deck) return NextResponse.json({ error: t("api.badDeck") }, { status: 400 })
 
   const encoded = encodeDeck(deck)
-  if (!encoded) return NextResponse.json({ error: t("api.deckTooLarge") }, { status: 413 })
+  if (!encoded) return NextResponse.json({ error: t("api.deckTooLarge", { limit: MAX_DECK_MB }) }, { status: 413 })
 
   const result = await writeDeck(id, reader.ownerId, deck, baseVersion, encoded)
   if (result.ok) return NextResponse.json({ deck: result.summary })

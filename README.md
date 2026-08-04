@@ -107,7 +107,7 @@ sits in its own pool of light, and everything drawn *inside* a slide uses fixed 
 rather than tokens, because a slide is the user's document rather than a surface the app is
 entitled to repaint.
 
-`npm test` runs the vitest suite — 394 cases covering sanitizing, geometry, SVG path data,
+`npm test` runs the vitest suite — 398 cases covering sanitizing, geometry, SVG path data,
 rich-text runs, deck migration, locale negotiation, the store, plus PPTX export, PPTX import,
 and an export→import round trip that generates and re-parses a real file. The export tests read
 the finished archive rather than pptxgenjs's draft of it, because half the mapping is written

@@ -6,6 +6,7 @@ import { deleteObjects, getObject, putObject } from "@/lib/s3"
 import {
   MAX_DECKS_PER_OWNER,
   MAX_DECK_BYTES,
+  MAX_DECK_MB,
   MAX_REQUEST_BYTES,
   blankDeck,
   encodeDeck,
@@ -16,7 +17,15 @@ import type { Deck } from "@/types/slides"
 import type { DeckSummary } from "@/types/deck"
 
 // the schema half is re-exported so callers reach one module for "a deck, stored"
-export { MAX_DECK_BYTES, MAX_REQUEST_BYTES, MAX_DECKS_PER_OWNER, blankDeck, encodeDeck, parseDeck }
+export {
+  MAX_DECK_BYTES,
+  MAX_DECK_MB,
+  MAX_REQUEST_BYTES,
+  MAX_DECKS_PER_OWNER,
+  blankDeck,
+  encodeDeck,
+  parseDeck,
+}
 export type { DeckSummary }
 
 function summarize(row: DeckRow): DeckSummary {

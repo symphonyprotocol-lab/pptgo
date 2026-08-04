@@ -11,7 +11,22 @@ import type { Deck } from "@/types/slides"
  * request is refused by nginx with a 413 before the app ever gets to say anything useful
  * about it.
  */
-export const MAX_DECK_BYTES = 50 * 1024 * 1024
+export const MAX_DECK_BYTES = 20 * 1024 * 1024
+
+/**
+ * The ceiling in whole megabytes, for the messages that have to say it out loud.
+ *
+ * Derived rather than written twice: the number in the error string had been left at 25
+ * through a change to 50, so the app refused a deck at one size and named another.
+ */
+export const MAX_DECK_MB = Math.round(MAX_DECK_BYTES / (1024 * 1024))
+
+/**
+ * What a file costs once it is inside the document. Everything embeds as a base64 data
+ * URI, which is four bytes for every three of the original, so a budget stated against
+ * `MAX_DECK_BYTES` has to be scaled by this before it is compared with a file's own size.
+ */
+export const EMBEDDED_RATIO = 3 / 4
 
 /**
  * Ceiling on the request body a deck arrives in. The envelope around the document is a key
