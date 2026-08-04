@@ -148,6 +148,19 @@ const PNG =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
 
 /** A slide → layout → master → theme chain carrying one accent colour. */
+/**
+ * The stock theme path, which the importer falls back to when no part links one. `cs` is
+ * left empty the way a real theme writes an unset slot.
+ */
+const THEME_WITH_FONTS: Record<string, string> = {
+  "ppt/theme/theme1.xml": `<?xml version="1.0"?>
+    <a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:themeElements>
+    <a:fontScheme name="custom">
+      <a:majorFont><a:latin typeface="Arial Black"/><a:ea typeface="黑体"/><a:cs typeface=""/></a:majorFont>
+      <a:minorFont><a:latin typeface="Arial"/><a:ea typeface="微软雅黑"/><a:cs typeface=""/></a:minorFont>
+    </a:fontScheme></a:themeElements></a:theme>`,
+}
+
 function themeExtras(accent1: string) {
   const relsFor = (id: string, type: string, target: string) =>
     `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
@@ -583,6 +596,28 @@ describe("hostile input", () => {
     expect(JSON.stringify(elements)).not.toContain("Click to edit")
   })
 
+  it("leaves the template's smaller furniture editable", async () => {
+    // a corner logo and a tagline swallow no clicks, so nothing is gained by locking them
+    // — and they are what a reader opening the deck actually wants to change
+    const extras = templateExtras({
+      masterBody:
+        `<p:pic><p:nvPicPr><p:cNvPr id="2" name="backdrop"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr>
+         <p:blipFill><a:blip r:embed="rId2"/></p:blipFill>
+         <p:spPr>${xfrm(0, 0, SLIDE_CX, SLIDE_CY)}</p:spPr></p:pic>` +
+        `<p:sp><p:nvSpPr><p:cNvPr id="4" name="tagline"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr>
+         <p:spPr>${xfrm(0, 0, 2000000, 400000)}</p:spPr>
+         <p:txBody><a:bodyPr/><a:p><a:r><a:t>公司标语</a:t></a:r></a:p></p:txBody></p:sp>`,
+    })
+    const deck = await importPptx(
+      await buildPptx([slideDoc("")], { ...extras, media: { "deco.png": PNG } }),
+    )
+    const [backdrop, tagline] = deck.slides[0].elements
+
+    // the full-bleed picture would otherwise eat every click on empty canvas
+    expect(backdrop.lock).toBe(true)
+    expect(tagline.lock).toBe(false)
+  })
+
   it("honours showMasterSp on the slide", async () => {
     const extras = templateExtras({
       masterBody: `<p:sp><p:nvSpPr><p:cNvPr id="2" name="deco"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>
@@ -698,5 +733,132 @@ describe("hostile input", () => {
     const text = deck.slides[0].elements[0] as TextElement
     expect(text.padding).toBe(0)
     expect(text.letterSpacing).toBeLessThan(0)
+  })
+
+  it("takes run defaults from the body's own lstStyle when the run is silent", async () => {
+    // Office and WPS put a title's whole look in lstStyle and leave the run bare
+    const body = `<p:sp><p:nvSpPr><p:cNvPr id="2" name="t"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr>
+      <p:spPr>${xfrm(0, 0, 4000000, 500000)}</p:spPr>
+      <p:txBody><a:bodyPr/>
+      <a:lstStyle><a:lvl1pPr><a:defRPr sz="2800" b="1"><a:solidFill><a:srgbClr val="0F243E"/></a:solidFill></a:defRPr></a:lvl1pPr></a:lstStyle>
+      <a:p><a:r><a:rPr lang="zh-CN"/><a:t>标题</a:t></a:r></a:p></p:txBody></p:sp>`
+    const deck = await importPptx(await buildPptx([slideDoc(body)]))
+    const text = deck.slides[0].elements[0] as TextElement
+    // 28pt at the 12192000-EMU slide width: 28 * 12700 * (1000 / 12192000)
+    expect(text.fontSize).toBeCloseTo(29.17, 1)
+    expect(text.bold).toBe(true)
+    expect(text.color).toBe("#0F243E")
+  })
+
+  it("decodes a Wingdings bullet run instead of leaving the letter", async () => {
+    const body = `<p:sp><p:nvSpPr><p:cNvPr id="2" name="t"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr>
+      <p:spPr>${xfrm(0, 0, 4000000, 500000)}</p:spPr>
+      <p:txBody><a:bodyPr/><a:p>
+        <a:r><a:rPr sz="1200"><a:latin typeface="Wingdings"/></a:rPr><a:t>n</a:t></a:r>
+        <a:r><a:rPr sz="1200"/><a:t> item</a:t></a:r>
+      </a:p></p:txBody></p:sp>`
+    const deck = await importPptx(await buildPptx([slideDoc(body)]))
+    const text = deck.slides[0].elements[0] as TextElement
+    expect(text.content).toContain("■")
+    expect(text.content).not.toContain(">n<")
+    expect(text.fontFamily).not.toContain("Wingdings")
+  })
+
+  it("keeps a table's cell insets, line spacing and paragraph breaks", async () => {
+    const cell = (paras: string) =>
+      `<a:tc><a:txBody>${paras}</a:txBody><a:tcPr marL="9842" marR="9842" marT="9842" marB="0"/></a:tc>`
+    const body = `<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="2" name="t"/></p:nvGraphicFramePr>
+      <p:xfrm><a:off x="0" y="0"/><a:ext cx="4000000" cy="1000000"/></p:xfrm>
+      <a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table"><a:tbl>
+      <a:tblGrid><a:gridCol w="2000000"/><a:gridCol w="2000000"/></a:tblGrid>
+      <a:tr h="500000">${cell(
+        `<a:p><a:pPr><a:lnSpc><a:spcPct val="100000"/></a:lnSpc></a:pPr><a:r><a:rPr sz="1000"/><a:t>第一行</a:t></a:r></a:p>
+         <a:p><a:r><a:rPr sz="1000"/><a:t>第二行</a:t></a:r></a:p>`,
+      )}${cell(`<a:p><a:r><a:rPr sz="1000"/><a:t>B</a:t></a:r></a:p>`)}</a:tr>
+      </a:tbl></a:graphicData></a:graphic></p:graphicFrame>`
+    const deck = await importPptx(await buildPptx([slideDoc(body)]))
+    const table = deck.slides[0].elements[0] as TableElement
+    expect(table.rows[0][0].text).toBe("第一行\n第二行")
+    // 9842 EMU at this deck's scale is well under a canvas unit
+    expect(table.cellPadding![0]).toBeLessThan(1)
+    expect(table.lineHeight).toBeCloseTo(1.2, 2)
+    // the element-level size follows the cells rather than the editor default
+    expect(table.fontSize).toBe(10)
+  })
+
+  it("resolves a +mn-ea typeface through the theme's font scheme", async () => {
+    // Chinese decks name their body face this way rather than spelling it out
+    const body = `<p:sp><p:nvSpPr><p:cNvPr id="2" name="t"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr>
+      <p:spPr>${xfrm(0, 0, 4000000, 500000)}</p:spPr>
+      <p:txBody><a:bodyPr/><a:p><a:r>
+        <a:rPr sz="1800"><a:latin typeface="+mn-lt"/><a:ea typeface="+mn-ea"/></a:rPr><a:t>正文</a:t>
+      </a:r></a:p></p:txBody></p:sp>`
+    const deck = await importPptx(await buildPptx([slideDoc(body)], { parts: THEME_WITH_FONTS }))
+    const text = deck.slides[0].elements[0] as TextElement
+    expect(text.fontFamily).toBe("'Arial', '微软雅黑', sans-serif")
+  })
+
+  it("drops a theme font reference the theme does not define", async () => {
+    const body = `<p:sp><p:nvSpPr><p:cNvPr id="2" name="t"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr>
+      <p:spPr>${xfrm(0, 0, 4000000, 500000)}</p:spPr>
+      <p:txBody><a:bodyPr/><a:p><a:r>
+        <a:rPr sz="1800"><a:latin typeface="+mn-cs"/></a:rPr><a:t>x</a:t>
+      </a:r></a:p></p:txBody></p:sp>`
+    const deck = await importPptx(await buildPptx([slideDoc(body)], { parts: THEME_WITH_FONTS }))
+    const text = deck.slides[0].elements[0] as TextElement
+    // never emitted as the literal "+mn-cs", which resolves to no font at all
+    expect(text.fontFamily).not.toContain("+")
+  })
+
+  it("rules a table with the border its cells actually carry", async () => {
+    const cell = (border: string) =>
+      `<a:tc><a:txBody><a:p><a:r><a:t>x</a:t></a:r></a:p></a:txBody><a:tcPr>${border}</a:tcPr></a:tc>`
+    const black = `<a:lnL w="6350"><a:solidFill><a:srgbClr val="000000"/></a:solidFill></a:lnL>
+                   <a:lnR w="6350"><a:solidFill><a:srgbClr val="000000"/></a:solidFill></a:lnR>`
+    const stray = `<a:lnL w="6350"><a:solidFill><a:srgbClr val="FF0000"/></a:solidFill></a:lnL>`
+    const body = `<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="2" name="t"/></p:nvGraphicFramePr>
+      <p:xfrm><a:off x="0" y="0"/><a:ext cx="4000000" cy="1000000"/></p:xfrm>
+      <a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table"><a:tbl>
+      <a:tblGrid><a:gridCol w="2000000"/><a:gridCol w="2000000"/></a:tblGrid>
+      <a:tr h="500000">${cell(black)}${cell(stray)}</a:tr>
+      </a:tbl></a:graphicData></a:graphic></p:graphicFrame>`
+    const deck = await importPptx(await buildPptx([slideDoc(body)]))
+    const table = deck.slides[0].elements[0] as TableElement
+    // black appears twice against the stray red once, so it stands for the table
+    expect(table.outline.color).toBe("#000000")
+    expect(table.outline.style).toBe("solid")
+  })
+
+  it("leaves the default border on a table whose cells state none", async () => {
+    const body = `<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="2" name="t"/></p:nvGraphicFramePr>
+      <p:xfrm><a:off x="0" y="0"/><a:ext cx="4000000" cy="1000000"/></p:xfrm>
+      <a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table"><a:tbl>
+      <a:tblGrid><a:gridCol w="4000000"/></a:tblGrid>
+      <a:tr h="500000"><a:tc><a:txBody><a:p><a:r><a:t>x</a:t></a:r></a:p></a:txBody>
+      <a:tcPr><a:lnL><a:noFill/></a:lnL></a:tcPr></a:tc></a:tr>
+      </a:tbl></a:graphicData></a:graphic></p:graphicFrame>`
+    const deck = await importPptx(await buildPptx([slideDoc(body)]))
+    expect((deck.slides[0].elements[0] as TableElement).outline.color).toBe("#d4d4d8")
+  })
+
+  it("reads chart series colours, resolving them through a themeOverride", async () => {
+    const base = chartExtras()
+    const parts: Record<string, string> = { ...base.parts }
+    parts["ppt/charts/chart1.xml"] = parts["ppt/charts/chart1.xml"].replace(
+      "<c:cat>",
+      `<c:spPr xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+       <a:solidFill><a:schemeClr val="accent1"/></a:solidFill></c:spPr><c:cat>`,
+    )
+    parts["ppt/charts/_rels/chart1.xml.rels"] =
+      `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+       <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/themeOverride" Target="../theme/themeOverride1.xml"/>
+       </Relationships>`
+    parts["ppt/theme/themeOverride1.xml"] =
+      `<?xml version="1.0"?><a:themeOverride xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+       <a:clrScheme name="o"><a:accent1><a:srgbClr val="4874CB"/></a:accent1></a:clrScheme></a:themeOverride>`
+    const deck = await importPptx(await buildPptx([slideDoc(chartFrame())], { rels: base.rels, parts }))
+    const chart = deck.slides[0].elements[0] as ChartElement
+    // the first series states accent1, resolved against the override rather than the theme
+    expect(chart.themeColors[0]).toBe("#4874CB")
   })
 })

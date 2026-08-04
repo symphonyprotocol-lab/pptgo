@@ -195,6 +195,42 @@ describe.skipIf(!live)("the MCP tools against real storage", () => {
     expect(slides[1].elements[0].text).toBe("revenue")
   })
 
+  it("publishes a share link, reads it back, and revokes it", async () => {
+    const deck = await freshDeck()
+
+    expect((await call("deck_share_read", { deckId: deck.deckId })).body.shared).toBe(false)
+
+    const opened = (await call("deck_share", { deckId: deck.deckId })).body
+    expect(opened.created).toBe(true)
+    // read-only unless the caller asks otherwise: a link that lets strangers edit is not
+    // something a default should hand out
+    expect(opened.mode).toBe("read")
+    expect(opened.hasPassword).toBe(false)
+    expect(String(opened.url)).toContain("https://pptgo.test/s/")
+
+    const read = (await call("deck_share_read", { deckId: deck.deckId })).body
+    expect(read.shared).toBe(true)
+    expect(read.url).toBe(opened.url)
+
+    // an unstated mode leaves the link as permissive as it already was
+    const locked = (await call("deck_share", { deckId: deck.deckId, password: "hunter2" })).body
+    expect(locked.created).toBe(false)
+    expect(locked.mode).toBe("read")
+    expect(locked.hasPassword).toBe(true)
+    expect(locked.url).toBe(opened.url)
+
+    const widened = (await call("deck_share", { deckId: deck.deckId, mode: "edit" })).body
+    expect(widened.mode).toBe("edit")
+    // changing the mode leaves the password alone
+    expect(widened.hasPassword).toBe(true)
+
+    const dropped = (await call("deck_share", { deckId: deck.deckId, password: null })).body
+    expect(dropped.hasPassword).toBe(false)
+
+    expect((await call("deck_unshare", { deckId: deck.deckId })).body.revoked).toBe(true)
+    expect((await call("deck_share_read", { deckId: deck.deckId })).body.shared).toBe(false)
+  })
+
   /**
    * The tools close over one owner for the life of one request, and every query underneath
    * filters by that owner in the same statement — so another account's deck is not "denied",
@@ -216,5 +252,12 @@ describe.skipIf(!live)("the MCP tools against real storage", () => {
 
     const listed = (await other("deck_list", {})).body.decks as { deckId: string }[]
     expect(listed.some((one) => one.deckId === deck.deckId)).toBe(false)
+
+    // sharing is a deck operation, so it is scoped the same way — another account cannot
+    // publish a link to a deck it cannot see
+    const published = await other("deck_share", { deckId: deck.deckId })
+    expect(published.failed).toBe(true)
+    expect((await other("deck_share_read", { deckId: deck.deckId })).failed).toBe(true)
+    expect((await other("deck_unshare", { deckId: deck.deckId })).failed).toBe(true)
   })
 })

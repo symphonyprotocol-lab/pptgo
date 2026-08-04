@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Layers, PanelLeft } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
@@ -13,7 +13,7 @@ import { Canvas } from "./canvas"
 import { PresentView } from "./present-view"
 import { PropertyPanel } from "./property-panel"
 import { SlideList } from "./slide-list"
-import { Toolbar } from "./toolbar"
+import { Toolbar, type SaveState } from "./toolbar"
 import { useIsCompact } from "./use-media-query"
 import { useShortcuts } from "./use-shortcuts"
 
@@ -39,6 +39,12 @@ export function EditorShell({ storage, backHref = "/" }: EditorShellProps) {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [conflict, setConflict] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
+  /**
+   * What the Save button shows. Autosave keeps writing on its own — this is the same write
+   * asked for on purpose, plus somewhere for the answer to appear, because a deck that
+   * saves silently gives a reader closing the tab nothing to look at.
+   */
+  const [saveState, setSaveState] = useState<SaveState>("idle")
   const dirty = useRef(false)
   /**
    * Read by the autosave timer, which fires long after the render that set it — state
@@ -241,6 +247,39 @@ export function EditorShell({ storage, backHref = "/" }: EditorShellProps) {
     }
   }
 
+  /**
+   * Save on request, rather than waiting out the autosave debounce.
+   *
+   * It reports through the same conflict path as the timer does: a write refused because
+   * someone else moved first is not an error to show, it is the banner asking which
+   * document should win.
+   */
+  const saveNow = useCallback(async () => {
+    if (!restored || !useEditor.getState().hydrated) return
+    setSaveState("saving")
+    try {
+      const result = await storage.save(useEditor.getState().exportDeck())
+      if (!result.ok) {
+        flagConflict(true)
+        setSaveState("idle")
+        return
+      }
+      dirty.current = false
+      setSaveError(null)
+      setSaveState("saved")
+    } catch (error) {
+      setSaveError((error as Error).message || t("error.storageSave"))
+      setSaveState("idle")
+    }
+  }, [restored, storage, t])
+
+  // the "saved" tick is an acknowledgement, not a status; it should not sit there forever
+  useEffect(() => {
+    if (saveState !== "saved") return
+    const timer = window.setTimeout(() => setSaveState("idle"), 2000)
+    return () => window.clearTimeout(timer)
+  }, [saveState])
+
   return (
     <TooltipProvider>
       <div className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
@@ -248,6 +287,8 @@ export function EditorShell({ storage, backHref = "/" }: EditorShellProps) {
           onPresent={() => setPresenting(true)}
           backHref={backHref}
           library={storage.library}
+          save={saveNow}
+          saveState={saveState}
         />
 
         <div className="flex min-h-0 flex-1">

@@ -5,6 +5,9 @@ import { cellBackground, cellTextColor, isHeaderRow } from "@/lib/table-theme"
 import type { TableCell, TableElement } from "@/types/slides"
 
 export function cellStyle(el: TableElement, cell: TableCell, row: number): CSSProperties {
+  // imported tables carry the source deck's cell insets and line spacing; without them a
+  // tight 10pt table inflates to two or three times its frame and spills over neighbours
+  const [padV, padH] = el.cellPadding ?? [4, 8]
   return {
     background: cellBackground(el, cell, row),
     color: cellTextColor(el, cell, row),
@@ -13,12 +16,14 @@ export function cellStyle(el: TableElement, cell: TableCell, row: number): CSSPr
     fontStyle: cell.italic ? "italic" : "normal",
     textDecoration: cell.underline ? "underline" : "none",
     textAlign: cell.align ?? "left",
+    lineHeight: el.lineHeight,
     border: el.outline.width
       ? `${el.outline.width}px ${el.outline.style} ${el.outline.color}`
       : "none",
-    padding: "4px 8px",
+    padding: `${padV}px ${padH}px`,
     verticalAlign: "middle",
     wordBreak: "break-word",
+    whiteSpace: "pre-wrap",
     overflow: "hidden",
   }
 }

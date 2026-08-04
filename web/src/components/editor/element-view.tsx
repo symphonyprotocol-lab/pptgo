@@ -1,7 +1,7 @@
 "use client"
 
 import type { CSSProperties } from "react"
-import { filterCss } from "@/lib/image"
+import { cropStyle, filterCss } from "@/lib/image"
 import type {
   ChartElement,
   ImageElement,
@@ -141,15 +141,6 @@ function ShapeView({ el }: { el: ShapeElement }) {
 
 function ImageView({ el }: { el: ImageElement }) {
   const f = el.filter
-  const clip = el.clip
-  // A crop is expressed as the visible fraction of the source, so the image is blown up
-  // by the inverse of that fraction and shifted to bring the window into view.
-  const [[x1, y1], [x2, y2]] = clip?.range ?? [
-    [0, 0],
-    [1, 1],
-  ]
-  const spanX = Math.max(0.01, x2 - x1)
-  const spanY = Math.max(0.01, y2 - y1)
 
   return (
     <div
@@ -170,15 +161,7 @@ function ImageView({ el }: { el: ImageElement }) {
         src={el.src}
         alt={el.name}
         draggable={false}
-        style={{
-          position: "absolute",
-          width: `${100 / spanX}%`,
-          height: `${100 / spanY}%`,
-          left: `${(-x1 / spanX) * 100}%`,
-          top: `${(-y1 / spanY) * 100}%`,
-          objectFit: "fill",
-          filter: filterCss(f),
-        }}
+        style={{ ...cropStyle(el.clip), filter: filterCss(f) }}
       />
       {el.colorMask && (
         <div style={{ position: "absolute", inset: 0, background: el.colorMask, mixBlendMode: "color" }} />

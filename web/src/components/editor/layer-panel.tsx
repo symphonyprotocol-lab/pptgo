@@ -90,6 +90,7 @@ export function LayerPanel() {
                 <button
                   onClick={(event) => {
                     const store = useEditor.getState()
+                    store.setHandleId(el.id)
                     if (event.shiftKey || event.metaKey || event.ctrlKey) store.toggleActiveId(el.id)
                     else store.setActiveIds([el.id])
                   }}

@@ -57,6 +57,14 @@ interface EditorState {
   slides: Slide[]
   slideIndex: number
   activeIds: string[]
+  /**
+   * The element the reader last pointed at, which is the one the style panel speaks for
+   * when several are selected. Selecting a group selects all of its members, and without
+   * this the panel would show whichever happened to sit lowest in the z-order rather than
+   * the thing that was actually clicked. Stale ids are harmless: readers of this resolve
+   * it against the current selection and fall back to the first of it.
+   */
+  handleId: string | null
   editingId: string | null
   /** [[row, col], [row, col]] anchor/focus while editing a table */
   tableSelection: [[number, number], [number, number]] | null
@@ -107,9 +115,11 @@ interface EditorState {
   applyBackgroundToAll: () => void
   setNotes: (notes: string) => void
   setTransition: (transition: TransitionType) => void
+  applyTransitionToAll: () => void
   setSection: (section: string | undefined) => void
 
   setActiveIds: (ids: string[]) => void
+  setHandleId: (id: string | null) => void
   toggleActiveId: (id: string) => void
   setEditingId: (id: string | null) => void
   setTableSelection: (selection: [[number, number], [number, number]] | null) => void
@@ -361,6 +371,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   slides: initial.slides,
   slideIndex: 0,
   activeIds: [],
+  handleId: null,
   editingId: null,
   tableSelection: null,
   creating: null,
@@ -393,6 +404,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       slides: deck.slides,
       slideIndex: 0,
       activeIds: [],
+      handleId: null,
       editingId: null,
       past: [],
       future: [],
@@ -410,6 +422,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       // the selection referred to elements of the replaced document; keeping ids that may
       // no longer exist would leave the property panel editing nothing
       activeIds: [],
+      handleId: null,
       editingId: null,
       tableSelection: null,
       past: [],
@@ -522,12 +535,21 @@ export const useEditor = create<EditorState>((set, get) => ({
     set((s) => ({ slides: mapCurrent(s.slides, s.slideIndex, (sl) => ({ ...sl, transition })) }))
   },
 
+  applyTransitionToAll: () => {
+    get().commit()
+    set((s) => {
+      const { transition } = s.slides[s.slideIndex]
+      return { slides: s.slides.map((sl) => ({ ...sl, transition })) }
+    })
+  },
+
   setSection: (section) => {
     get().commit()
     set((s) => ({ slides: mapCurrent(s.slides, s.slideIndex, (sl) => ({ ...sl, section })) }))
   },
 
   setActiveIds: (ids) => set({ activeIds: ids }),
+  setHandleId: (handleId) => set({ handleId }),
   toggleActiveId: (id) =>
     set((s) => ({
       activeIds: s.activeIds.includes(id)

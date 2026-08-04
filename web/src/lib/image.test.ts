@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { bakeImage, filterCss, hasFilter, needsBaking } from "./image"
+import { bakeImage, cropStyle, filterCss, hasFilter, needsBaking } from "./image"
 import { createImageElement } from "./factory"
 
 const NEUTRAL = { blur: 0, brightness: 100, contrast: 100, grayscale: 0, saturate: 100, sepia: 0 }
@@ -62,5 +62,39 @@ describe("bakeImage", () => {
       colorMask: "#ff0000",
     })
     await expect(bakeImage(element)).resolves.toBe("data:image/png;base64,not-a-png")
+  })
+})
+
+describe("cropStyle", () => {
+  it("leaves an uncropped image filling its frame", () => {
+    expect(cropStyle(undefined)).toMatchObject({
+      width: "100%",
+      height: "100%",
+      left: "0%",
+      top: "0%",
+    })
+  })
+
+  it("blows the source up by the inverse of the visible fraction and shifts it into view", () => {
+    // the left 25% of the source, from a quarter of the way down
+    const style = cropStyle({ range: [[0, 0.25], [0.25, 1]] })
+    expect(style.width).toBe("400%")
+    expect(style.height).toBe(`${100 / 0.75}%`)
+    expect(style.left).toBe("0%")
+    expect(style.top).toBe(`${(-0.25 / 0.75) * 100}%`)
+  })
+
+  it("opts out of the stylesheet's image cap so the blow-up survives", () => {
+    // `max-width: 100%` from the reset would clamp the width above back to the frame,
+    // cancelling the crop and squeezing the whole bitmap into it instead
+    const style = cropStyle({ range: [[0, 0], [0.3, 1]] })
+    expect(style.maxWidth).toBe("none")
+    expect(style.maxHeight).toBe("none")
+  })
+
+  it("refuses a degenerate range instead of dividing by zero", () => {
+    const style = cropStyle({ range: [[0.5, 0.5], [0.5, 0.5]] })
+    expect(style.width).toBe("10000%")
+    expect(Number.isFinite(parseFloat(String(style.left)))).toBe(true)
   })
 })

@@ -42,6 +42,7 @@ const TOOLS: { key: string; label: MessageKey; body: MessageKey }[] = [
   { key: "read", label: "mcp.toolsRead", body: "mcp.toolsReadBody" },
   { key: "write", label: "mcp.toolsWrite", body: "mcp.toolsWriteBody" },
   { key: "preview", label: "mcp.toolsPreview", body: "mcp.toolsPreviewBody" },
+  { key: "share", label: "mcp.toolsShare", body: "mcp.toolsShareBody" },
 ]
 
 const TROUBLE: { key: string; label: MessageKey; body: MessageKey }[] = [

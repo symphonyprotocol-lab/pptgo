@@ -48,6 +48,7 @@ import type {
   FormulaElement,
   ImageElement,
   MediaElement,
+  Outline,
   LineElement,
   ShapeElement,
   SlideElement,
@@ -132,11 +133,18 @@ function SliderRow({
   onChange: (value: number) => void
 }) {
   const t = useT()
+  // An imported value is whatever the source deck worked out — a line height of
+  // 0.9891, a letter spacing of -0.20833333333333334 — and printing it raw put the
+  // full float in the panel. The slider's own step says how precise the control
+  // actually is, so the readout is shown to that.
+  const decimals = Math.max(0, Math.ceil(-Math.log10(step)))
+  // adding zero folds the -0 that a small negative rounds to back into 0
+  const shown = (Number(value.toFixed(decimals)) + 0).toFixed(decimals)
   return (
     <div className="space-y-1.5">
       <div className="flex justify-between text-xs text-muted-foreground">
         <span>{t(label)}</span>
-        <span className="tabular-nums">{value}</span>
+        <span className="tabular-nums">{shown}</span>
       </div>
       <Slider
         value={[value]}
@@ -177,6 +185,7 @@ export function PropertyPanel({ className }: { className?: string } = {}) {
   const slides = useEditor((s) => s.slides)
   const slideIndex = useEditor((s) => s.slideIndex)
   const activeIds = useEditor((s) => s.activeIds)
+  const handleId = useEditor((s) => s.handleId)
   const theme = useEditor((s) => s.theme)
 
   const slide = slides[Math.min(slideIndex, slides.length - 1)]
@@ -186,50 +195,97 @@ export function PropertyPanel({ className }: { className?: string } = {}) {
   )
   const single = selected.length === 1 ? selected[0] : null
 
+  /**
+   * The element the style tab speaks for.
+   *
+   * Requiring a selection of exactly one left the tab empty for every multiple selection —
+   * and clicking any grouped element selects its whole group, so on an imported deck that
+   * was most of them: you could select the shape, see it highlighted, and have nothing to
+   * change it with but an opacity slider.
+   *
+   * It is the element last pointed at rather than the first of the selection, because those
+   * differ exactly when it matters: clicking one member of a group selects them all, and
+   * the first is whichever sits lowest in the z-order — click the label on a banner and the
+   * panel would offer to crop the picture behind it.
+   */
+  const primary = selected.find((el) => el.id === handleId) ?? selected[0] ?? null
+
   const patch = (p: Partial<SlideElement>) =>
     useEditor.getState().updateElements(selected.map((el) => ({ id: el.id, patch: p })))
+
+  /**
+   * Style edits reach every selected element of the primary's kind and stop there — a font
+   * size means nothing to the picture sitting next to the text box, and writing it there
+   * would leave the element carrying a property its renderer never reads.
+   */
+  const patchKind = (p: Partial<SlideElement>) =>
+    useEditor
+      .getState()
+      .updateElements(
+        selected.filter((el) => el.type === primary?.type).map((el) => ({ id: el.id, patch: p })),
+      )
+
+  const kindCount = selected.filter((el) => el.type === primary?.type).length
+
+  /**
+   * A selection of one kind keeps that kind's whole panel, because every control on it
+   * applies to all of them. Only a mixed selection has to fall back to the batch panel.
+   */
+  const mixed = new Set(selected.map((el) => el.type)).size > 1
 
   return (
     <aside className={cn("flex w-72 shrink-0 flex-col border-l bg-background", className)}>
       <Tabs
-        key={selected.length ? "element" : "empty"}
-        defaultValue={selected.length ? "style" : "slide"}
+        key={selected.length ? "element" : "slide"}
+        defaultValue={selected.length ? "style" : "design"}
         className="flex min-h-0 flex-1 flex-col"
       >
-        <TabsList className="mx-3 mt-3 grid grid-cols-4">
-          <TabsTrigger value="style" disabled={!selected.length}>
-            {t("panel.tabStyle")}
-          </TabsTrigger>
-          <TabsTrigger value="position" disabled={!selected.length}>
-            {t("panel.tabPosition")}
-          </TabsTrigger>
-          <TabsTrigger value="animation">{t("panel.tabAnimation")}</TabsTrigger>
-          <TabsTrigger value="slide">{t("panel.tabSlide")}</TabsTrigger>
+        {/*
+          The two tab sets are alternatives, not one set with half of it greyed out: with
+          nothing selected the panel is about the slide, and the slide's own settings had
+          been buried behind a "page" tab sitting next to two disabled ones.
+        */}
+        <TabsList className="mx-3 mt-3 grid grid-cols-3">
+          {selected.length ? (
+            <>
+              <TabsTrigger value="style">{t("panel.tabStyle")}</TabsTrigger>
+              <TabsTrigger value="position">{t("panel.tabPosition")}</TabsTrigger>
+              <TabsTrigger value="animation">{t("panel.tabAnimation")}</TabsTrigger>
+            </>
+          ) : (
+            <>
+              <TabsTrigger value="design">{t("panel.tabDesign")}</TabsTrigger>
+              <TabsTrigger value="transition">{t("panel.tabTransition")}</TabsTrigger>
+              <TabsTrigger value="animation">{t("panel.tabAnimation")}</TabsTrigger>
+            </>
+          )}
         </TabsList>
 
         <div className="min-h-0 flex-1 overflow-y-auto p-3">
           <TabsContent value="style" className="mt-0 space-y-4">
-            {single?.type === "text" && <TextPanel el={single} patch={patch} />}
-            {single?.type === "shape" && <ShapePanel el={single} patch={patch} />}
-            {single?.type === "image" && <ImagePanel el={single} patch={patch} />}
-            {single?.type === "line" && <LinePanel el={single} patch={patch} />}
-            {single?.type === "table" && <TablePanel el={single} patch={patch} />}
-            {single?.type === "chart" && <ChartPanel el={single} patch={patch} />}
-            {(single?.type === "video" || single?.type === "audio") && (
-              <MediaPanel el={single} patch={patch} />
-            )}
-            {single?.type === "formula" && <FormulaPanel el={single} patch={patch} />}
-            {!single && selected.length > 1 && (
+            {selected.length > 1 && (
               <p className="text-xs text-muted-foreground">
                 {t("panel.multiSelection", { count: selected.length })}
+                {!mixed && kindCount > 1 && ` · ${t("panel.editingKind", { count: kindCount })}`}
               </p>
             )}
+            {mixed && <MultiStylePanel selected={selected} />}
+            {!mixed && primary?.type === "text" && <TextPanel el={primary} patch={patchKind} />}
+            {!mixed && primary?.type === "shape" && <ShapePanel el={primary} patch={patchKind} />}
+            {!mixed && primary?.type === "image" && <ImagePanel el={primary} patch={patchKind} />}
+            {!mixed && primary?.type === "line" && <LinePanel el={primary} patch={patchKind} />}
+            {!mixed && primary?.type === "table" && <TablePanel el={primary} patch={patchKind} />}
+            {!mixed && primary?.type === "chart" && <ChartPanel el={primary} patch={patchKind} />}
+            {!mixed && (primary?.type === "video" || primary?.type === "audio") && (
+              <MediaPanel el={primary} patch={patchKind} />
+            )}
+            {!mixed && primary?.type === "formula" && <FormulaPanel el={primary} patch={patchKind} />}
             {!!selected.length && (
               <>
                 <Separator />
                 <SliderRow
                   label="panel.opacity"
-                  value={Math.round((single?.opacity ?? 1) * 100)}
+                  value={Math.round((primary?.opacity ?? 1) * 100)}
                   min={0}
                   max={100}
                   onChange={(v) => patch({ opacity: v / 100 })}
@@ -313,7 +369,7 @@ export function PropertyPanel({ className }: { className?: string } = {}) {
             <AnimationPanel />
           </TabsContent>
 
-          <TabsContent value="slide" className="mt-0 space-y-4">
+          <TabsContent value="design" className="mt-0 space-y-4">
             <Row label="panel.backgroundType">
               <Select
                 value={slide.background.type}
@@ -452,24 +508,9 @@ export function PropertyPanel({ className }: { className?: string } = {}) {
             </Button>
 
             <Separator />
-            <Row label="panel.transition">
-              <Select
-                value={slide.transition ?? "none"}
-                onValueChange={(value) => useEditor.getState().setTransition(value as TransitionType)}
-              >
-                <SelectTrigger className="h-8 w-32">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {TRANSITIONS.map((transition) => (
-                    <SelectItem key={transition.value} value={transition.value}>
-                      {t(transition.labelKey)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Row>
+            <ThemeControls />
 
+            <Separator />
             <div className="space-y-1.5">
               <Label className="text-xs font-normal text-muted-foreground">{t("panel.sectionTitle")}</Label>
               <Input
@@ -492,11 +533,212 @@ export function PropertyPanel({ className }: { className?: string } = {}) {
               />
             </div>
           </TabsContent>
+
+          <TabsContent value="transition" className="mt-0 space-y-3">
+            <div className="grid grid-cols-2 gap-1.5">
+              {TRANSITIONS.map((transition) => (
+                <Button
+                  key={transition.value}
+                  variant={(slide.transition ?? "none") === transition.value ? "default" : "outline"}
+                  size="sm"
+                  className="text-xs"
+                  onClick={() => useEditor.getState().setTransition(transition.value)}
+                >
+                  {t(transition.labelKey)}
+                </Button>
+              ))}
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full text-xs"
+              onClick={() => useEditor.getState().applyTransitionToAll()}
+            >
+              {t("panel.applyToAll")}
+            </Button>
+          </TabsContent>
         </div>
       </Tabs>
 
       <LayerPanel />
     </aside>
+  )
+}
+
+/**
+ * What a selection of different kinds of element can still be changed together.
+ *
+ * A selection that is all one kind gets that kind's whole panel, because every control on
+ * it means the same thing for every member. A mixed one cannot: there is no "font size" for
+ * the picture sitting between two text boxes. So this offers only what genuinely crosses
+ * types, and each control reaches the elements that have the property and leaves the rest
+ * alone — the count next to it says how many that is.
+ */
+function MultiStylePanel({ selected }: { selected: SlideElement[] }) {
+  const t = useT()
+  const has = (...types: SlideElement["type"][]) =>
+    selected.filter((el) => types.includes(el.type))
+
+  const fillable = has("text", "shape", "chart")
+  const outlineable = has("text", "shape", "image", "table")
+  const sizable = has("text", "shape", "table")
+  const colourable = has("text", "shape", "line")
+
+  const apply = (
+    targets: SlideElement[],
+    patchOf: (el: SlideElement) => Partial<SlideElement>,
+  ) => {
+    if (!targets.length) return
+    record()
+    useEditor
+      .getState()
+      .updateElements(targets.map((el) => ({ id: el.id, patch: patchOf(el) })))
+  }
+
+  /** Shapes keep their type under `text`; everything else states it on the element. */
+  const typography = (el: SlideElement, key: "fontFamily" | "fontSize" | "color", value: unknown) =>
+    el.type === "shape"
+      ? ({ text: { ...(el as ShapeElement).text, [key]: value } } as Partial<SlideElement>)
+      : ({ [key]: value } as Partial<SlideElement>)
+
+  const count = (n: number) => (n ? ` (${n})` : "")
+
+  return (
+    <div className="space-y-3">
+      {!!fillable.length && (
+        <Row label="panel.fill">
+          <ColorPicker
+            value={(fillable[0] as { fill?: string }).fill ?? "#ffffff"}
+            onChange={(fill) => apply(fillable, () => ({ fill }) as Partial<SlideElement>)}
+          />
+          <span className="text-xs text-muted-foreground">{count(fillable.length)}</span>
+        </Row>
+      )}
+
+      {!!sizable.length && (
+        <>
+          <Select
+            value=""
+            onValueChange={(fontFamily) =>
+              apply(sizable, (el) => typography(el, "fontFamily", fontFamily))
+            }
+          >
+            <SelectTrigger className="h-8 w-full">
+              <SelectValue placeholder={`${t("panel.fontFamily")}${count(sizable.length)}`} />
+            </SelectTrigger>
+            <SelectContent>
+              {FONT_FAMILIES.map((f) => (
+                <SelectItem key={f.value} value={f.value} style={{ fontFamily: f.value }}>
+                  {f.labelKey ? t(f.labelKey) : f.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Row label="panel.sizeAndColour">
+            <Select
+              value=""
+              onValueChange={(v) =>
+                apply(sizable, (el) => typography(el, "fontSize", Number(v)))
+              }
+            >
+              <SelectTrigger className="h-8 w-20">
+                <SelectValue placeholder="—" />
+              </SelectTrigger>
+              <SelectContent>
+                {FONT_SIZES.map((size) => (
+                  <SelectItem key={size} value={String(size)}>
+                    {size}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {!!colourable.length && (
+              <ColorPicker
+                value="#111827"
+                onChange={(color) =>
+                  apply(colourable, (el) =>
+                    el.type === "line"
+                      ? ({ color } as Partial<SlideElement>)
+                      : typography(el, "color", color),
+                  )
+                }
+              />
+            )}
+          </Row>
+        </>
+      )}
+
+      {!!outlineable.length && (
+        <OutlineControls
+          outline={(outlineable[0] as { outline?: Outline }).outline}
+          onChange={(outline) => apply(outlineable, () => ({ outline }) as Partial<SlideElement>)}
+        />
+      )}
+    </div>
+  )
+}
+
+/**
+ * The deck's own theme, which every factory reads for its defaults and the chart panel
+ * offers as a palette. The store has carried it since the beginning and nothing in the
+ * interface ever showed it, so a deck's font, text colour and accent colours could only be
+ * changed one element at a time.
+ */
+function ThemeControls() {
+  const t = useT()
+  const theme = useEditor((s) => s.theme)
+  const setTheme = (patch: Partial<typeof theme>) => {
+    record()
+    useEditor.getState().setTheme(patch)
+  }
+
+  return (
+    <div className="space-y-3">
+      <Label className="text-xs font-normal text-muted-foreground">{t("panel.themeHeading")}</Label>
+
+      <Select value={theme.fontFamily} onValueChange={(fontFamily) => setTheme({ fontFamily })}>
+        <SelectTrigger className="h-8 w-full">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {FONT_FAMILIES.map((f) => (
+            <SelectItem key={f.value} value={f.value} style={{ fontFamily: f.value }}>
+              {f.labelKey ? t(f.labelKey) : f.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+
+      <Row label="panel.themeText">
+        <ColorPicker value={theme.fontColor} onChange={(fontColor) => setTheme({ fontColor })} />
+      </Row>
+      <Row label="panel.themeBackground">
+        <ColorPicker
+          value={theme.backgroundColor}
+          onChange={(backgroundColor) => setTheme({ backgroundColor })}
+        />
+      </Row>
+
+      <div className="space-y-1.5">
+        <Label className="text-xs font-normal text-muted-foreground">
+          {t("panel.themeColors")}
+        </Label>
+        <div className="flex flex-wrap gap-1.5">
+          {theme.themeColors.map((color, index) => (
+            <ColorPicker
+              key={index}
+              value={color}
+              onChange={(next) =>
+                setTheme({
+                  themeColors: theme.themeColors.map((c, i) => (i === index ? next : c)),
+                })
+              }
+            />
+          ))}
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -825,6 +1067,9 @@ function TextPanel({ el, patch }: { el: TextElement; patch: Patch }) {
         value={el.letterSpacing}
         min={-4}
         max={20}
+        // imported tracking is fractional — a deck tightens a label by a fifth of a point
+        // to make it fit — so whole-pixel steps could neither show nor keep it
+        step={0.1}
         onChange={(letterSpacing) => patch({ letterSpacing } as Partial<TextElement>)}
       />
       <SliderRow
@@ -1541,19 +1786,26 @@ const FORMULA_SAMPLES: { labelKey: MessageKey; latex: string }[] = [
 
 function FormulaPanel({ el, patch }: { el: FormulaElement; patch: Patch }) {
   const t = useT()
-  const [draft, setDraft] = useState(el.latex)
+  /**
+   * Keyed by element, the way `ChartPanel` and `LinkRow` already are. Seeding plain state
+   * from the prop meant the box kept whichever formula was selected first: selecting a
+   * second one re-rendered the same component, React kept the old state, and the panel
+   * showed — and on blur would have written back — the previous element's LaTeX.
+   */
+  const [draft, setDraft] = useState<{ id: string; latex: string } | null>(null)
+  const latex = draft?.id === el.id ? draft.latex : el.latex
 
   return (
     <div className="space-y-3">
       <div className="space-y-1.5">
         <Label className="text-xs font-normal text-muted-foreground">LaTeX</Label>
         <textarea
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
+          value={latex}
+          onChange={(e) => setDraft({ id: el.id, latex: e.target.value })}
           onBlur={() => {
-            if (draft === el.latex) return
+            if (latex === el.latex) return
             record()
-            patch({ latex: draft } as Partial<FormulaElement>)
+            patch({ latex } as Partial<FormulaElement>)
           }}
           rows={4}
           spellCheck={false}
@@ -1570,7 +1822,7 @@ function FormulaPanel({ el, patch }: { el: FormulaElement; patch: Patch }) {
             className="h-7 px-2 text-xs"
             onClick={() => {
               record()
-              setDraft(sample.latex)
+              setDraft({ id: el.id, latex: sample.latex })
               patch({ latex: sample.latex } as Partial<FormulaElement>)
             }}
           >

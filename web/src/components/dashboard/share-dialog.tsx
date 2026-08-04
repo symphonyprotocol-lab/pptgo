@@ -20,6 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { cn } from "@/lib/utils"
 import type { Translate } from "@/lib/i18n/translate"
 import type { DeckSummary } from "@/types/deck"
 import type { Share, ShareMode } from "@/types/share"
@@ -165,6 +166,41 @@ function ShareForm({
         </div>
       ) : (
         <div className="space-y-4">
+          {/*
+            The link comes first once there is one. It is the thing the dialog was opened
+            to get, and it used to sit last, below two settings the owner had already made
+            — a copy-and-go arrived at the bottom of a form.
+          */}
+          {share && (
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-1.5 font-mono text-[10px] tracking-wider text-muted-foreground uppercase">
+                <Link2 className="size-3" />
+                {t("share.linkLabel")}
+              </div>
+              {/*
+                The whole bar copies. A link next to a button is two targets for one
+                intention, and the button was the smaller of them.
+              */}
+              <button
+                type="button"
+                onClick={() => void copy()}
+                title={url}
+                className="group flex w-full min-w-0 items-center gap-2 rounded-lg border border-border bg-muted/40 px-2.5 py-2 text-left transition hover:border-foreground/25 hover:bg-muted focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+              >
+                <span className="min-w-0 flex-1 truncate font-mono text-xs">{url}</span>
+                <span
+                  className={cn(
+                    "flex shrink-0 items-center gap-1 text-xs transition",
+                    copied ? "text-primary" : "text-muted-foreground group-hover:text-foreground",
+                  )}
+                >
+                  {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+                  {copied ? t("share.copied") : t("share.copy")}
+                </span>
+              </button>
+            </div>
+          )}
+
           <div className="space-y-1.5">
             <Label htmlFor="share-mode">{t("share.modeLabel")}</Label>
             <Select value={mode} onValueChange={(value) => setMode(value as ShareMode)}>
@@ -179,7 +215,16 @@ function ShareForm({
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="share-password">{t("share.passwordLabel")}</Label>
+            <div className="flex items-center justify-between gap-2">
+              <Label htmlFor="share-password">{t("share.passwordLabel")}</Label>
+              {/* the state of the stored password, where the field it describes can see it */}
+              {share?.hasPassword && (
+                <span className="flex shrink-0 items-center gap-1 rounded border border-border px-1.5 py-0.5 font-mono text-[10px] tracking-wider text-muted-foreground uppercase">
+                  <Lock className="size-3" />
+                  {t("share.passwordSet")}
+                </span>
+              )}
+            </div>
             <Input
               id="share-password"
               type="password"
@@ -191,49 +236,47 @@ function ShareForm({
               onChange={(event) => setPassword(event.target.value)}
             />
             {share?.hasPassword && (
-              <div className="flex items-center justify-between gap-2 pt-0.5">
-                <span className="flex items-center gap-1 font-mono text-[11px] tracking-wider text-muted-foreground">
-                  <Lock className="size-3" />
-                  {t("share.passwordSet")} · {t("share.passwordKeep")}
+              <div className="flex items-center justify-between gap-2">
+                <span
+                  className={cn(
+                    "min-w-0 text-[11px]",
+                    clearPassword ? "text-destructive" : "text-muted-foreground",
+                  )}
+                >
+                  {clearPassword ? t("share.passwordWillClear") : t("share.passwordKeep")}
                 </span>
                 <button
                   type="button"
                   onClick={() => setClearPassword((on) => !on)}
                   className="shrink-0 text-xs underline underline-offset-3 hover:text-foreground"
                 >
-                  {clearPassword ? t("share.close") : t("share.passwordClear")}
+                  {clearPassword ? t("share.passwordKeepIt") : t("share.passwordClear")}
                 </button>
               </div>
             )}
           </div>
 
-          {share && (
-            <div className="space-y-1.5">
-              <Label>{t("share.linkLabel")}</Label>
-              <div className="flex min-w-0 items-center gap-2">
-                <code className="min-w-0 flex-1 overflow-x-auto border border-border bg-muted px-3 py-2 font-mono text-xs whitespace-nowrap">
-                  {url}
-                </code>
-                <Button variant="secondary" size="sm" onClick={() => void copy()}>
-                  {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
-                  {copied ? t("share.copied") : t("share.copy")}
-                </Button>
-              </div>
-              <p className="font-mono text-[11px] tracking-wider text-muted-foreground">
-                {t("share.revokeHint")}
-              </p>
-            </div>
-          )}
-
           {error && <p className="text-xs text-destructive">{error}</p>}
         </div>
       )}
 
-      <DialogFooter>
-        {share && (
-          <Button variant="outline" disabled={busy} onClick={() => void revoke()}>
-            {t("share.revoke")}
-          </Button>
+      <DialogFooter className="sm:items-center sm:justify-between">
+        {/*
+          Stopping is destructive and permanent, so it is tinted as such and kept at the
+          other end of the footer from Save — the two used to sit side by side in the same
+          neutral outline, a misclick apart.
+        */}
+        {share ? (
+          <div className="flex min-w-0 items-center gap-2">
+            <Button variant="destructive" size="sm" disabled={busy} onClick={() => void revoke()}>
+              {t("share.revoke")}
+            </Button>
+            <span className="hidden min-w-0 text-[11px] leading-snug text-muted-foreground sm:block">
+              {t("share.revokeHint")}
+            </span>
+          </div>
+        ) : (
+          <span />
         )}
         <Button disabled={busy || loading} onClick={() => void save()}>
           {busy && <Loader2 className="size-4 animate-spin" />}
