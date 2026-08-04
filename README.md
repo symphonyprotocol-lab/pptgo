@@ -4,10 +4,17 @@ An online slide editor — **PPTist-style, in the browser**, built with Next.js 
 
 > **改版说明.** pptgo started as an MCP App that only ran *inside Claude Desktop*: Claude
 > authored slides as SVG, you edited them in an iframe in the chat, and a Python pipeline
-> turned them into `.pptx`. That half is gone — commit `24af4ce` deleted the MCP server, and
-> `0a92f6b` is the snapshot taken right before it, if you want to read the old code. What is
-> left is a standalone web app in [`web/`](web): open a page, edit slides directly, export a
-> native `.pptx`. No MCP host, no Python, no Claude required.
+> turned them into `.pptx`. That is gone — commit `24af4ce` deleted it, and `0a92f6b` is the
+> snapshot taken right before, if you want to read the old code. What replaced it is the web
+> app in [`web/`](web), which stands on its own: open a page, edit slides, export a native
+> `.pptx`. No host, no Python, no Claude required.
+>
+> An agent surface came back later, and it is a different thing from the one that left. It
+> is a *server*, at [`/api/mcp`](web/src/app/api/mcp) — any MCP client talks to it over HTTP
+> and writes into a hosted deck, rather than the app living inside one particular host. The
+> deck it writes is the same document the editor opens, so nothing is generated *for* the
+> agent and nothing has to be converted back. See [the agent side](#the-agent-side) below;
+> it is optional, and everything above works without ever connecting one.
 
 The whole thing self-hosts with one command — Next.js, PostgreSQL and an S3-compatible
 object store, no third-party service in the loop:
@@ -35,6 +42,10 @@ npm run dev        # http://localhost:3000
 | `/dashboard` | your decks — new, rename, duplicate, delete | yes |
 | `/editor` | the editor, deck kept in the browser's IndexedDB | no |
 | `/editor/[id]` | the editor, deck kept in object storage | yes |
+| `/preview/[id]` | watch a deck being written, live | no — the link carries its own access |
+| `/s/[token]` | a deck someone shared, read-only or editable | no |
+| `/mcp` | how to point an agent at this deployment | no |
+| `/settings/tokens` | the API tokens an agent authenticates with | yes |
 
 ## The web editor
 
@@ -107,13 +118,51 @@ sits in its own pool of light, and everything drawn *inside* a slide uses fixed 
 rather than tokens, because a slide is the user's document rather than a surface the app is
 entitled to repaint.
 
-`npm test` runs the vitest suite — 398 cases covering sanitizing, geometry, SVG path data,
-rich-text runs, deck migration, locale negotiation, the store, plus PPTX export, PPTX import,
-and an export→import round trip that generates and re-parses a real file. The export tests read
-the finished archive rather than pptxgenjs's draft of it, because half the mapping is written
-by the patch pass.
+`npm test` runs the vitest suite — over 1300 cases covering sanitizing, geometry, SVG path
+data, rich-text runs, deck migration, locale negotiation, the store, the agent-facing layouts
+and lint, plus PPTX export, PPTX import, and an export→import round trip that generates and
+re-parses a real file. The export tests read the finished archive rather than pptxgenjs's draft
+of it, because half the mapping is written by the patch pass.
 
 More detail in [`web/README.md`](web/README.md).
+
+## The agent side
+
+[`/api/mcp`](web/src/app/api/mcp) is an MCP server over HTTP. Point any client at it with a
+token from `/settings/tokens`; [`/mcp`](web/src/app/mcp) prints the configuration for the
+deployment you are reading it on. Everything above works without it.
+
+Sixteen tools, at the granularity the work arrives in: a page for writing, an element for
+adjusting. There is deliberately no write-the-whole-deck tool — that would let a model
+buffer everything and emit it at the end, and a deck appearing a page at a time is the part
+a person is watching, on the `/preview/[id]` link every writing tool hands back. Every write
+carries the version it started from and is refused if that is no longer current, so two
+writers cannot bury each other.
+
+**An agent cannot see the slide it just wrote.** That is the constraint the whole surface is
+shaped around, and it has two halves.
+
+[`design/`](web/src/lib/mcp/design) is the first. `slide_layout` takes words in named slots —
+a title and up to six points, four cards, a chart and its takeaway — and places them: eighteen
+page types on a twelve-column grid, at type sizes computed from the words actually supplied,
+in colours checked for contrast against the field behind them. `deck_theme_preset` sets one of
+eight looks by name. The extra tokens a layout needs — a surface colour, a muted ink, a type
+scale, a corner radius — are not stored anywhere: `DeckTheme` is four fields, so a preset
+projects into those four in a way that identifies it and [`themes.ts`](web/src/lib/mcp/design/themes.ts)
+reads it back, while a deck themed by hand or imported from a `.pptx` gets tokens derived from
+the same four instead. What lands is ordinary elements, so `element_patch` still adjusts one
+and whoever opens the deck drags them around like anything else.
+
+[`lint.ts`](web/src/lib/mcp/lint.ts) is the second, and it rides along on `deck_outline`:
+margins, text taller than its box, type under the readable floor, contrast against whatever is
+actually behind the text, colours outside the theme, edges that almost line up. Each rule is
+narrower than it could be on purpose — a warning list people learn to skip is worse than no
+warning list — so margins are only reported for content that is *nearly* flush rather than
+flush, and contrast only where the field underneath can be identified.
+
+Every page type, in every theme, in Chinese and English, is rendered in the test suite and put
+through that same lint. A layout that cannot pass the check applied to everyone else's work
+has no business being the recommended path.
 
 ## Accounts, storage, deployment
 
