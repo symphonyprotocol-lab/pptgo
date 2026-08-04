@@ -155,4 +155,12 @@ describe("localDeckStorage", () => {
   it("offers no polling, because IndexedDB has no second writer", () => {
     expect(localDeckStorage(fallbackTranslate).changedRemotely).toBeNull()
   })
+
+  it("keeps a library, because the browser-local editor has one deck slot to switch", () => {
+    expect(localDeckStorage(fallbackTranslate).library).not.toBeNull()
+  })
+
+  it("keeps none in the cloud, where swapping decks would save one over another's id", () => {
+    expect(cloudDeckStorage(DECK_ID, fallbackTranslate).library).toBeNull()
+  })
 })

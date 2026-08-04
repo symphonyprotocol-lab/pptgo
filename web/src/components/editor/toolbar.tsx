@@ -62,8 +62,10 @@ import { SHAPE_LIST } from "@/lib/shapes"
 import { VIEWPORT_HEIGHT, VIEWPORT_WIDTH } from "@/lib/constants"
 import { useT } from "@/lib/i18n/client"
 import { useEditor } from "@/store/editor"
+import type { DeckLibrary } from "@/lib/deck-storage"
 import type { Deck } from "@/types/slides"
 import { FindReplace } from "./find-replace"
+import { OpenMenu } from "./open-menu"
 
 function IconButton({
   label,
@@ -114,9 +116,12 @@ const MAX_DECK_FILE_BYTES = 40 * 1024 * 1024
 export function Toolbar({
   onPresent,
   backHref = "/",
+  library,
 }: {
   onPresent: () => void
   backHref?: string
+  /** the decks this editor can switch between, when its storage keeps any */
+  library?: DeckLibrary | null
 }) {
   const t = useT()
   const title = useEditor((s) => s.title)
@@ -192,14 +197,23 @@ export function Toolbar({
     reader.readAsDataURL(file)
   }
 
+  /**
+   * Importing replaces the whole document, so the one on screen is filed on the way out —
+   * otherwise opening a .pptx to look at it threw away whatever was being edited, with no
+   * undo and nothing in the interface to suggest it had happened.
+   */
+  const replaceDeck = async (deck: Deck) => {
+    await library?.archive(useEditor.getState().exportDeck()).catch(() => {})
+    useEditor.getState().loadDeck(normalizeDeck(deck, t))
+  }
+
   const onImportDeck = async (file: File) => {
     if (!withinLimit(file, MAX_DECK_FILE_BYTES)) return
 
     if (file.name.toLowerCase().endsWith(".pptx")) {
       setBusy(t("editor.busyImporting"))
       try {
-        const deck = await importPptx(file, t)
-        useEditor.getState().loadDeck(normalizeDeck(deck, t))
+        await replaceDeck(await importPptx(file, t))
       } catch (error) {
         window.alert(t("error.pptxUnparsable", { message: (error as Error).message }))
       } finally {
@@ -212,7 +226,7 @@ export function Toolbar({
     try {
       const raw = JSON.parse(text) as Deck
       if (!Array.isArray(raw.slides)) throw new Error("no slides")
-      useEditor.getState().loadDeck(normalizeDeck(raw, t))
+      await replaceDeck(raw)
     } catch {
       window.alert(t("error.deckUnparsable"))
     }
@@ -240,6 +254,7 @@ export function Toolbar({
       >
         <LogoMark />
       </Link>
+      {library && <OpenMenu library={library} />}
       <Input
         value={title}
         aria-label={t("editor.deckTitle")}

@@ -51,6 +51,12 @@ services:
       - "${RUSTFS_BIND:-127.0.0.1}:${RUSTFS_CONSOLE_PORT:-9101}:9001" # console
 
   web:
+    # Two ways this image comes to exist, and the deployment picks one by setting the
+    # variable. On a server it is the tag CI pushed to GHCR, so `docker compose pull`
+    # fetches a build that already happened and the box needs no source tree and no
+    # toolchain. Left unset — which is every clone — it names the image `docker compose
+    # up --build` produces locally, and nothing about the developer flow changes.
+    image: ${WEB_IMAGE:-pptgo-web:local}
     build:
       context: ./web
     restart: unless-stopped
@@ -75,7 +81,12 @@ services:
       AUTH_GOOGLE_ID: "${AUTH_GOOGLE_ID:-}"
       AUTH_GOOGLE_SECRET: "${AUTH_GOOGLE_SECRET:-}"
 
-      S3_ENDPOINT: http://rustfs:9000
+      # The container next door, unless a deployment says otherwise. Keeping it internal
+      # is the point rather than an accident: a deck runs to megabytes and every editor
+      # load fetches one, so that request never leaves the host, needs no TLS handshake
+      # and does not stop working when a certificate lapses. The variable exists for the
+      # deployment whose bucket genuinely lives somewhere else.
+      S3_ENDPOINT: "${S3_ENDPOINT:-http://rustfs:9000}"
       S3_REGION: ${S3_REGION:-us-east-1}
       S3_BUCKET: ${S3_BUCKET:-pptgo}
       S3_ACCESS_KEY_ID: "${S3_ACCESS_KEY_ID:?}"

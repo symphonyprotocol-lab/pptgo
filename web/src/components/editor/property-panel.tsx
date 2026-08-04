@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   AlignCenter,
   AlignJustify,
@@ -36,6 +36,7 @@ import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { parseChart, serializeChart } from "@/lib/chart-data"
 import { ANIMATIONS, CHART_TYPES, FONT_FAMILIES, FONT_SIZES, TRANSITIONS } from "@/lib/constants"
 import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n/client"
@@ -504,7 +505,27 @@ type Patch = (p: Partial<SlideElement>) => void
 function LinkRow({ el }: { el: SlideElement }) {
   const t = useT()
   const slides = useEditor((s) => s.slides)
-  const [draft, setDraft] = useState(el.link?.type === "web" ? el.link.target : "")
+  const stored = el.link?.type === "web" ? el.link.target : ""
+  const [draft, setDraft] = useState<{ id: string; target: string } | null>(null)
+  const target = draft?.id === el.id ? draft.target : stored
+  /** the typed address, kept where an unmount cannot take it — see `ChartPanel.apply` */
+  const pending = useRef<{ id: string; target: string } | null>(null)
+
+  const apply = useCallback(() => {
+    const edit = pending.current
+    pending.current = null
+    if (!edit) return
+    // the box is only shown for a web link, so it also disappears when the link is turned
+    // off or switched to a slide — writing the address back then would resurrect it
+    const current = useEditor
+      .getState()
+      .currentSlide()
+      .elements.find((e) => e.id === edit.id)
+    if (current?.link?.type !== "web" || current.link.target === edit.target) return
+    useEditor.getState().setLink(edit.id, { type: "web", target: edit.target })
+  }, [])
+
+  useEffect(() => () => apply(), [apply])
 
   return (
     <div className="space-y-2">
@@ -514,7 +535,7 @@ function LinkRow({ el }: { el: SlideElement }) {
           onValueChange={(value) => {
             if (value === "none") return useEditor.getState().setLink(el.id, undefined)
             if (value === "web")
-              return useEditor.getState().setLink(el.id, { type: "web", target: draft })
+              return useEditor.getState().setLink(el.id, { type: "web", target })
             useEditor.getState().setLink(el.id, { type: "slide", target: slides[0].id })
           }}
         >
@@ -532,11 +553,18 @@ function LinkRow({ el }: { el: SlideElement }) {
 
       {el.link?.type === "web" && (
         <Input
-          value={draft}
+          value={target}
           placeholder="https://"
           className="h-8 text-xs"
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={() => useEditor.getState().setLink(el.id, { type: "web", target: draft })}
+          onChange={(e) => {
+            const edit = { id: el.id, target: e.target.value }
+            pending.current = edit
+            setDraft(edit)
+          }}
+          onBlur={() => {
+            apply()
+            setDraft(null)
+          }}
         />
       )}
       {el.link?.type === "slide" && (
@@ -1308,7 +1336,40 @@ function TablePanel({ el, patch }: { el: TableElement; patch: Patch }) {
 
 function ChartPanel({ el, patch }: { el: ChartElement; patch: Patch }) {
   const t = useT()
-  const [text, setText] = useState(() => serializeChart(el))
+  /**
+   * The typed-but-not-yet-applied text, tagged with the chart it belongs to.
+   *
+   * Holding it as plain state meant the box was filled once, on first mount, and this
+   * panel is not remounted when the selection moves from one chart to another: the second
+   * chart showed the first one's numbers, and blurring wrote them onto it. The tag also
+   * settles the race on the way out — the pointer down that changes the selection lands
+   * before the blur, so the write has to name the chart the text was typed for rather than
+   * whatever is selected by the time it runs.
+   */
+  const [draft, setDraft] = useState<{ id: string; text: string } | null>(null)
+  const text = draft?.id === el.id ? draft.text : serializeChart(el)
+  /**
+   * The same edit again, in a ref, because it has to outlive this component. Clicking the
+   * slide clears the selection, which unmounts the whole panel — and the browser fires no
+   * blur on a node that has already been removed. Typing here and then clicking away *in
+   * the sidebar* saved; typing here and clicking back onto the slide silently did not.
+   */
+  const pending = useRef<{ id: string; text: string } | null>(null)
+
+  const apply = useCallback(() => {
+    const edit = pending.current
+    pending.current = null
+    if (!edit) return
+    const data = parseChart(edit.text)
+    // unparseable text is left alone rather than turned into an empty chart
+    if (!data) return
+    record()
+    // by id, not by selection: the pointer down that changes the selection lands before
+    // the blur, so by now `el` may be a different chart
+    useEditor.getState().updateElement(edit.id, { data } as Partial<ChartElement>)
+  }, [])
+
+  useEffect(() => () => apply(), [apply])
 
   return (
     <div className="space-y-3">
@@ -1339,12 +1400,16 @@ function ChartPanel({ el, patch }: { el: ChartElement; patch: Patch }) {
         </Label>
         <textarea
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            const edit = { id: el.id, text: e.target.value }
+            pending.current = edit
+            setDraft(edit)
+          }}
           onBlur={() => {
-            const data = parseChart(text)
-            if (!data) return setText(serializeChart(el))
-            record()
-            patch({ data } as Partial<ChartElement>)
+            apply()
+            // dropping the draft is also how the box re-syncs: with nothing pending it
+            // shows the element's own data again, including when the text did not parse
+            setDraft(null)
           }}
           rows={6}
           spellCheck={false}
@@ -1402,41 +1467,6 @@ function ChartPanel({ el, patch }: { el: ChartElement; patch: Patch }) {
       </div>
     </div>
   )
-}
-
-/** Chart data is edited as a small TSV block — quick to retype, and paste-friendly from a spreadsheet. */
-function serializeChart(el: ChartElement): string {
-  const header = ["", ...el.data.series.map((s) => s.name)].join("\t")
-  const rows = el.data.categories.map((category, i) =>
-    [category, ...el.data.series.map((s) => s.values[i] ?? 0)].join("\t"),
-  )
-  return [header, ...rows].join("\n")
-}
-
-function parseChart(text: string): ChartElement["data"] | null {
-  const lines = text
-    .split("\n")
-    .map((line) => line.trimEnd())
-    .filter((line) => line.trim().length)
-  if (lines.length < 2) return null
-
-  const split = (line: string) => line.split(/\t|\s{2,}|,/).map((cell) => cell.trim())
-  const header = split(lines[0])
-  const names = header.slice(1)
-  if (!names.length) return null
-
-  const categories: string[] = []
-  const series = names.map((name) => ({ name, values: [] as number[] }))
-
-  for (const line of lines.slice(1)) {
-    const cells = split(line)
-    categories.push(cells[0] ?? "")
-    names.forEach((_, i) => {
-      const value = Number(cells[i + 1])
-      series[i].values.push(Number.isFinite(value) ? value : 0)
-    })
-  }
-  return { categories, series }
 }
 
 function MediaPanel({ el, patch }: { el: MediaElement; patch: Patch }) {

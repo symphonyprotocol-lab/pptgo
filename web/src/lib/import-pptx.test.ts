@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import JSZip from "jszip"
 import { importPptx } from "./import-pptx"
 import { VIEWPORT_HEIGHT, VIEWPORT_WIDTH } from "./constants"
+import { SHAPE_MAP } from "./shapes"
 import type {
   ChartElement,
   ImageElement,
@@ -109,6 +110,42 @@ function chartExtras({
     },
   }
 }
+
+/**
+ * A slide → layout → master chain whose master carries the background and the furniture
+ * every slide built on it inherits.
+ */
+function templateExtras({
+  masterBg = "",
+  masterBody = "",
+  layoutBody = "",
+}: { masterBg?: string; masterBody?: string; layoutBody?: string } = {}) {
+  const relsFor = (id: string, type: string, target: string, extra = "") =>
+    `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+     <Relationship Id="${id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/${type}" Target="${target}"/>${extra}</Relationships>`
+
+  return {
+    rels: `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>`,
+    parts: {
+      "ppt/slideLayouts/slideLayout1.xml": `<?xml version="1.0"?><p:sldLayout ${NS}><p:cSld><p:spTree>${layoutBody}</p:spTree></p:cSld></p:sldLayout>`,
+      "ppt/slideLayouts/_rels/slideLayout1.xml.rels": relsFor(
+        "rId1",
+        "slideMaster",
+        "../slideMasters/slideMaster1.xml",
+      ),
+      "ppt/slideMasters/slideMaster1.xml": `<?xml version="1.0"?><p:sldMaster ${NS}><p:cSld>${masterBg}<p:spTree>${masterBody}</p:spTree></p:cSld></p:sldMaster>`,
+      "ppt/slideMasters/_rels/slideMaster1.xml.rels": relsFor(
+        "rId1",
+        "image",
+        "../media/bg.png",
+        `<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/deco.png"/>`,
+      ),
+    },
+  }
+}
+
+const PNG =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
 
 /** A slide → layout → master → theme chain carrying one accent colour. */
 function themeExtras(accent1: string) {
@@ -498,5 +535,168 @@ describe("hostile input", () => {
         expect(c.rowspan).toBeGreaterThanOrEqual(1)
       }
     }
+  })
+
+  it("takes the background from the master when the slide states none", async () => {
+    const extras = templateExtras({
+      masterBg: `<p:bg><p:bgPr><a:blipFill><a:blip r:embed="rId1"/></a:blipFill></p:bgPr></p:bg>`,
+    })
+    const deck = await importPptx(
+      await buildPptx([slideDoc("")], { ...extras, media: { "bg.png": PNG } }),
+    )
+    expect(deck.slides[0].background.type).toBe("image")
+    expect(deck.slides[0].background.image?.startsWith("data:image/png;base64,")).toBe(true)
+  })
+
+  it("prefers the slide's own background over the master's", async () => {
+    const extras = templateExtras({
+      masterBg: `<p:bg><p:bgPr><a:solidFill><a:srgbClr val="000000"/></a:solidFill></p:bgPr></p:bg>`,
+    })
+    const bg = `<p:bg><p:bgPr><a:solidFill><a:srgbClr val="102030"/></a:solidFill></p:bgPr></p:bg>`
+    const deck = await importPptx(await buildPptx([slideDoc("", bg)], extras))
+    expect(deck.slides[0].background).toMatchObject({ type: "solid", color: "#102030" })
+  })
+
+  it("draws the master's furniture under the slide, locked, without its placeholders", async () => {
+    const extras = templateExtras({
+      masterBody:
+        `<p:pic><p:nvPicPr><p:cNvPr id="2" name="bg object"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr>
+         <p:blipFill><a:blip r:embed="rId2"/></p:blipFill>
+         <p:spPr>${xfrm(0, 0, SLIDE_CX, SLIDE_CY)}</p:spPr></p:pic>` +
+        `<p:sp><p:nvSpPr><p:cNvPr id="3" name="title ph"/><p:cNvSpPr/><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr>
+         <p:spPr>${xfrm(0, 0, 914400, 914400)}<a:prstGeom prst="rect"/></p:spPr>
+         <p:txBody><a:bodyPr/><a:p><a:r><a:t>Click to edit Master title</a:t></a:r></a:p></p:txBody></p:sp>`,
+    })
+    const slide = `<p:sp><p:nvSpPr><p:cNvPr id="9" name="t"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr>
+      <p:spPr>${xfrm(0, 0, 914400, 914400)}</p:spPr>
+      <p:txBody><a:bodyPr/><a:p><a:r><a:t>real content</a:t></a:r></a:p></p:txBody></p:sp>`
+    const deck = await importPptx(
+      await buildPptx([slideDoc(slide)], { ...extras, media: { "deco.png": PNG } }),
+    )
+    const elements = deck.slides[0].elements
+
+    // the master's picture paints first, the slide's own content last
+    expect(elements.map((el) => el.type)).toEqual(["image", "text"])
+    expect(elements[0].lock).toBe(true)
+    expect(elements[1].lock).toBeUndefined()
+    // the layout's prompt text is not content and must never reach the slide
+    expect(JSON.stringify(elements)).not.toContain("Click to edit")
+  })
+
+  it("honours showMasterSp on the slide", async () => {
+    const extras = templateExtras({
+      masterBody: `<p:sp><p:nvSpPr><p:cNvPr id="2" name="deco"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>
+        <p:spPr>${xfrm(0, 0, 914400, 914400)}<a:prstGeom prst="rect"/>
+        <a:solidFill><a:srgbClr val="FF0000"/></a:solidFill></p:spPr></p:sp>`,
+    })
+    const hidden = slideDoc("").replace("<p:sld ", `<p:sld showMasterSp="0" `)
+    const deck = await importPptx(await buildPptx([slideDoc(""), hidden], extras))
+    expect(deck.slides[0].elements).toHaveLength(1)
+    expect(deck.slides[1].elements).toHaveLength(0)
+  })
+
+  it("places a graphic frame from its p:xfrm", async () => {
+    const body = `<p:graphicFrame><p:xfrm>${
+      `<a:off x="${EMU_PER_INCH}" y="${EMU_PER_INCH}"/><a:ext cx="${EMU_PER_INCH * 4}" cy="${EMU_PER_INCH * 2}"/>`
+    }</p:xfrm><a:graphic><a:graphicData><a:tbl>
+      <a:tblGrid><a:gridCol w="100"/></a:tblGrid>
+      <a:tr><a:tc><a:txBody><a:p><a:r><a:t>x</a:t></a:r></a:p></a:txBody></a:tc></a:tr>
+      </a:tbl></a:graphicData></a:graphic></p:graphicFrame>`
+    const deck = await importPptx(await buildPptx([slideDoc(body)], {}))
+    const table = deck.slides[0].elements[0] as TableElement
+    const perInch = (VIEWPORT_WIDTH / SLIDE_CX) * EMU_PER_INCH
+    expect(table.left).toBeCloseTo(perInch, 1)
+    expect(table.width).toBeCloseTo(perInch * 4, 1)
+    expect(table.height).toBeCloseTo(perInch * 2, 1)
+  })
+
+  it("takes a table cell's fill from tcPr, not from the colour of its text", async () => {
+    const body = `<p:graphicFrame><p:xfrm><a:off x="0" y="0"/><a:ext cx="914400" cy="914400"/></p:xfrm>
+      <a:graphic><a:graphicData><a:tbl>
+      <a:tblGrid><a:gridCol w="100"/><a:gridCol w="100"/></a:tblGrid>
+      <a:tr>
+        <a:tc><a:txBody><a:p><a:r><a:rPr sz="1200"><a:solidFill><a:srgbClr val="000000"/></a:solidFill></a:rPr>
+          <a:t>dark type</a:t></a:r></a:p></a:txBody><a:tcPr/></a:tc>
+        <a:tc><a:txBody><a:p><a:r><a:t>filled</a:t></a:r></a:p></a:txBody>
+          <a:tcPr><a:solidFill><a:srgbClr val="112233"/></a:solidFill></a:tcPr></a:tc>
+      </a:tr></a:tbl></a:graphicData></a:graphic></p:graphicFrame>`
+    const deck = await importPptx(await buildPptx([slideDoc(body)], {}))
+    const table = deck.slides[0].elements[0] as TableElement
+    expect(table.rows[0][0].fill).toBeUndefined()
+    expect(table.rows[0][0].color).toBe("#000000")
+    expect(table.rows[0][1].fill).toBe("#112233")
+    // banding would repaint rows the source deliberately left plain
+    expect(table.theme.banded).toBe(false)
+  })
+
+  it("leaves an unfilled shape transparent instead of painting it grey", async () => {
+    const body = `<p:sp><p:nvSpPr><p:cNvPr id="2" name="s"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>
+      <p:spPr>${xfrm(0, 0, 914400, 914400)}<a:prstGeom prst="ellipse"/><a:noFill/>
+      <a:ln><a:solidFill><a:srgbClr val="FF0000"/></a:solidFill></a:ln></p:spPr></p:sp>`
+    const deck = await importPptx(await buildPptx([slideDoc(body)]))
+    const shape = deck.slides[0].elements[0] as ShapeElement
+    // the outline's colour must not be mistaken for the fill
+    expect(shape.fill).toBe("transparent")
+    expect(shape.outline?.color).toBe("#FF0000")
+  })
+
+  it("fills a shape from its p:style when spPr states none", async () => {
+    const body = `<p:sp><p:nvSpPr><p:cNvPr id="2" name="s"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>
+      <p:spPr>${xfrm(0, 0, 914400, 914400)}<a:prstGeom prst="rect"/></p:spPr>
+      <p:style><a:fillRef idx="1"><a:schemeClr val="accent1"/></a:fillRef></p:style>
+      <p:txBody><a:bodyPr/><a:p><a:r><a:t>12</a:t></a:r></a:p></p:txBody></p:sp>`
+    const deck = await importPptx(await buildPptx([slideDoc(body)], themeExtras("#336699")))
+    const shape = deck.slides[0].elements[0] as ShapeElement
+    // a labelled bar is a shape, not a text box, even though its fill lives in the style
+    expect(shape.type).toBe("shape")
+    expect(shape.fill).toBe("#336699")
+  })
+
+  it("applies a scheme colour's transforms", async () => {
+    const body = `<p:sp><p:nvSpPr><p:cNvPr id="2" name="s"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>
+      <p:spPr>${xfrm(0, 0, 914400, 914400)}<a:prstGeom prst="rect"/>
+      <a:solidFill><a:srgbClr val="FFFFFF"><a:lumMod val="85000"/></a:srgbClr></a:solidFill></p:spPr></p:sp>`
+    const deck = await importPptx(await buildPptx([slideDoc(body)]))
+    // 85% of white's luminance is a mid grey, not white
+    expect((deck.slides[0].elements[0] as ShapeElement).fill).toBe("#d9d9d9")
+  })
+
+  it("converts custom geometry into a path of its own", async () => {
+    const body = `<p:sp><p:nvSpPr><p:cNvPr id="2" name="s"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>
+      <p:spPr>${xfrm(0, 0, 914400, 914400)}<a:custGeom><a:pathLst>
+      <a:path w="100" h="100"><a:moveTo><a:pt x="0" y="0"/></a:moveTo>
+      <a:lnTo><a:pt x="100" y="50"/></a:lnTo><a:lnTo><a:pt x="0" y="100"/></a:lnTo>
+      <a:close/></a:path></a:pathLst></a:custGeom>
+      <a:solidFill><a:srgbClr val="123456"/></a:solidFill></p:spPr></p:sp>`
+    const deck = await importPptx(await buildPptx([slideDoc(body)]))
+    const shape = deck.slides[0].elements[0] as ShapeElement
+    // normalised into the 200-unit box every shape path is authored in
+    expect(shape.path).toBe("M 0 0 L 200 100 L 0 200 Z")
+    expect(shape.fill).toBe("#123456")
+    // a key with no preset behind it is what makes export rasterise the path
+    expect(SHAPE_MAP.has(shape.shapeKey)).toBe(false)
+  })
+
+  it("shrinks text PowerPoint had already shrunk to fit", async () => {
+    const withFit = (fit: string) =>
+      `<p:sp><p:nvSpPr><p:cNvPr id="2" name="t"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr>
+       <p:spPr>${xfrm(0, 0, 1000000, 400000)}</p:spPr>
+       <p:txBody><a:bodyPr>${fit}</a:bodyPr><a:p><a:r><a:rPr sz="4000"/><a:t>long</a:t></a:r></a:p></p:txBody></p:sp>`
+    const deck = await importPptx(
+      await buildPptx([slideDoc(withFit("")), slideDoc(withFit(`<a:normAutofit fontScale="50000"/>`))]),
+    )
+    const full = deck.slides[0].elements[0] as TextElement
+    const scaled = deck.slides[1].elements[0] as TextElement
+    expect(scaled.fontSize).toBeCloseTo(full.fontSize / 2, 3)
+  })
+
+  it("carries the text body's own insets instead of assuming padding", async () => {
+    const body = `<p:sp><p:nvSpPr><p:cNvPr id="2" name="t"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr>
+      <p:spPr>${xfrm(0, 0, 1000000, 400000)}</p:spPr>
+      <p:txBody><a:bodyPr lIns="0"/><a:p><a:r><a:rPr sz="1800" spc="-100"/><a:t>tight</a:t></a:r></a:p></p:txBody></p:sp>`
+    const deck = await importPptx(await buildPptx([slideDoc(body)]))
+    const text = deck.slides[0].elements[0] as TextElement
+    expect(text.padding).toBe(0)
+    expect(text.letterSpacing).toBeLessThan(0)
   })
 })

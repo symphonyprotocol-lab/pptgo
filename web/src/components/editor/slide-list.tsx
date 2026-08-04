@@ -23,7 +23,22 @@ export function SlideList({ className }: { className?: string } = {}) {
   const [overIndex, setOverIndex] = useState<number | null>(null)
 
   return (
-    <aside className={cn("flex w-52 shrink-0 flex-col border-r bg-background", className)}>
+    /*
+      Both `min-h-0`s below are what make this list scroll rather than run off the bottom
+      of the screen. A flex item's automatic minimum size is its content, so each of these
+      boxes was floored at the height of every thumbnail stacked up — 4000-odd pixels for a
+      43-slide deck — and overflowed its parent instead of scrolling inside it. Short decks
+      fit, which is why it only showed up on a long one.
+      The `aside` needs the same treatment: in the narrow layout it is a flex item of the
+      drawer, where `shrink-0` — there to hold the sidebar's width in the wide layout — is
+      pinning its *height* to its content instead, so `h-full` states the height outright.
+    */
+    <aside
+      className={cn(
+        "flex h-full min-h-0 w-52 shrink-0 flex-col border-r bg-background",
+        className,
+      )}
+    >
       <div className="flex items-center justify-between border-b px-3 py-2">
         <span className="text-xs font-medium text-muted-foreground">
           {t("editor.slidesDrawer", { index: slideIndex + 1, total: slides.length })}
@@ -39,7 +54,7 @@ export function SlideList({ className }: { className?: string } = {}) {
         </Button>
       </div>
 
-      <ScrollArea className="flex-1">
+      <ScrollArea className="min-h-0 flex-1">
         <ul className="space-y-2 p-3">
           {slides.map((slide, index) => (
             <li
@@ -65,7 +80,13 @@ export function SlideList({ className }: { className?: string } = {}) {
               <span className="w-4 shrink-0 text-right text-[11px] text-muted-foreground tabular-nums">
                 {index + 1}
               </span>
-              <div className="group relative flex-1">
+              {/*
+                `min-w-0` for the same reason as the `min-h-0`s above, on the other axis:
+                a fluid thumbnail has no width of its own, so this flex item's automatic
+                minimum size would be the slide's full 1000px and the rail would stretch to
+                it instead of the thumbnail shrinking to the rail.
+              */}
+              <div className="group relative min-w-0 flex-1">
                 <button
                   onClick={() => useEditor.getState().setSlideIndex(index)}
                   // the thumbnail is the whole label, so without this the list reads as a
@@ -79,7 +100,8 @@ export function SlideList({ className }: { className?: string } = {}) {
                       : "hover:border-muted-foreground/40",
                   )}
                 >
-                  <SlideThumbnail slide={slide} width={148} />
+                  {/* no width: the card is the measure, so the slide fills it edge to edge */}
+                  <SlideThumbnail slide={slide} />
                 </button>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>

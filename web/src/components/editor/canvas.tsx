@@ -19,7 +19,14 @@ import {
 import { computeSnap, type GuideLine } from "@/lib/snapping"
 import { useT } from "@/lib/i18n/client"
 import { useEditor } from "@/store/editor"
-import type { LineElement, ShapeElement, SlideElement, TextElement } from "@/types/slides"
+import type {
+  ChartElement,
+  LineElement,
+  ShapeElement,
+  SlideElement,
+  TextElement,
+} from "@/types/slides"
+import { ChartEditor } from "./chart-editor"
 import { CanvasContextMenu } from "./context-menu"
 import { EditableText } from "./editable-text"
 import { ElementBox, shapeTextStyle, textBoxStyle } from "./element-view"
@@ -162,7 +169,14 @@ export function Canvas() {
     slideRef.current.elements.filter((el) => ids.has(el.id) && !el.lock).map((el) => ({ ...el }))
 
   const onElementPointerDown = (event: React.PointerEvent, element: SlideElement) => {
-    if (creating || editingId === element.id) return
+    if (creating) return
+    if (editingId === element.id) {
+      // An element being edited owns its own pointer events. Bowing out without also
+      // holding the event here let it reach the canvas, which reads any pointer down as a
+      // click away and closes the editor.
+      event.stopPropagation()
+      return
+    }
     if (event.button === 2) return
     event.stopPropagation()
     const store = useEditor.getState()
@@ -642,70 +656,91 @@ export function Canvas() {
               />
             )}
 
-            {slide.elements.map((element) => {
-              const editing = editingId === element.id
-              const display =
-                editing && element.type === "shape"
-                  ? ({ ...element, text: { ...element.text, content: "" } } as ShapeElement)
-                  : element
+            {/*
+              Elements are clipped to the sheet, the way `SlideView` clips them everywhere
+              else — an element dragged half off the slide showed its whole self here and
+              only its visible half in the preview and the export, so the canvas was
+              disagreeing with every other view about what the slide contains.
 
-              return (
-                <ElementBox
-                  key={element.id}
-                  element={display}
-                  onPointerDown={(e) => onElementPointerDown(e, element)}
-                  onDoubleClick={(e) => {
-                    e.stopPropagation()
-                    if (element.lock) return
-                    if (
-                      element.type === "text" ||
-                      element.type === "shape" ||
-                      element.type === "table"
-                    ) {
-                      useEditor.getState().setEditingId(element.id)
+              Only the content is clipped. The selection frame, its handles and the guides
+              stay outside this layer: clipping those too would leave an element that has
+              been pushed off the edge with nothing left to grab it by.
+
+              The layer takes no pointer events of its own — it covers the whole sheet, so
+              it would otherwise swallow the clicks that clear the selection or start a
+              marquee — and each element turns them back on for itself.
+            */}
+            <div className="pointer-events-none absolute inset-0 overflow-hidden">
+              {slide.elements.map((element) => {
+                const editing = editingId === element.id
+                const display =
+                  editing && element.type === "shape"
+                    ? ({ ...element, text: { ...element.text, content: "" } } as ShapeElement)
+                    : element
+
+                return (
+                  <ElementBox
+                    key={element.id}
+                    element={display}
+                    onPointerDown={(e) => onElementPointerDown(e, element)}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation()
+                      if (element.lock) return
+                      if (
+                        element.type === "text" ||
+                        element.type === "shape" ||
+                        element.type === "table" ||
+                        element.type === "chart"
+                      ) {
+                        useEditor.getState().setEditingId(element.id)
+                      }
+                    }}
+                    style={{ pointerEvents: "auto", cursor: element.lock ? "default" : "move" }}
+                    contentOverride={
+                      editing && element.type === "text" ? (
+                        <EditableText
+                          html={(element as TextElement).content}
+                          style={textBoxStyle(element as TextElement)}
+                          scale={scale}
+                          onCommit={(html, contentHeight) => {
+                            const store = useEditor.getState()
+                            store.commit()
+                            store.updateElement(element.id, {
+                              content: html,
+                              height: Math.max(24, contentHeight),
+                            } as Partial<TextElement>)
+                            store.setEditingId(null)
+                          }}
+                        />
+                      ) : undefined
                     }
-                  }}
-                  style={{ cursor: element.lock ? "default" : "move" }}
-                  contentOverride={
-                    editing && element.type === "text" ? (
+                  >
+                    {editing && element.type === "shape" && (
                       <EditableText
-                        html={(element as TextElement).content}
-                        style={textBoxStyle(element as TextElement)}
+                        html={(element as ShapeElement).text.content}
+                        style={shapeTextStyle(element as ShapeElement)}
                         scale={scale}
-                        onCommit={(html, contentHeight) => {
+                        onCommit={(html) => {
                           const store = useEditor.getState()
                           store.commit()
                           store.updateElement(element.id, {
-                            content: html,
-                            height: Math.max(24, contentHeight),
-                          } as Partial<TextElement>)
+                            text: { ...(element as ShapeElement).text, content: html },
+                          } as Partial<ShapeElement>)
                           store.setEditingId(null)
                         }}
                       />
-                    ) : undefined
-                  }
-                >
-                  {editing && element.type === "shape" && (
-                    <EditableText
-                      html={(element as ShapeElement).text.content}
-                      style={shapeTextStyle(element as ShapeElement)}
-                      scale={scale}
-                      onCommit={(html) => {
-                        const store = useEditor.getState()
-                        store.commit()
-                        store.updateElement(element.id, {
-                          text: { ...(element as ShapeElement).text, content: html },
-                        } as Partial<ShapeElement>)
-                        store.setEditingId(null)
-                      }}
-                    />
-                  )}
-                </ElementBox>
-              )
-            })}
+                    )}
+                  </ElementBox>
+                )
+              })}
+            </div>
 
             {editingElement?.type === "table" && (
               <TableEditor element={editingElement} scale={scale} />
+            )}
+
+            {editingElement?.type === "chart" && (
+              <ChartEditor element={editingElement as ChartElement} scale={scale} />
             )}
 
             {guides.map((line, i) => (

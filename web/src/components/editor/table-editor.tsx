@@ -15,6 +15,8 @@ export function TableEditor({ element, scale }: { element: TableElement; scale: 
   const ref = useRef<HTMLDivElement>(null)
   const [anchor, setAnchor] = useState<[number, number] | null>(null)
   const selection = useEditor((s) => s.tableSelection)
+  /** whether the cell that has focus has been typed into yet — see `onChange` below */
+  const dirty = useRef(false)
 
   useEffect(() => {
     const onDown = (event: MouseEvent) => {
@@ -62,7 +64,19 @@ export function TableEditor({ element, scale }: { element: TableElement; scale: 
         transform: element.rotate ? `rotate(${element.rotate}deg)` : undefined,
         zIndex: 90,
       }}
+      // The canvas clears `editingId` on any pointer down that reaches it. `mousedown` was
+      // being held back but `pointerdown` is a separate event and was not, so clicking into
+      // a cell closed the editor before the cell could take focus — which made the table
+      // look like something that simply could not be typed into.
+      onPointerDown={(event) => event.stopPropagation()}
       onMouseDown={(event) => event.stopPropagation()}
+      onKeyDown={(event) => {
+        event.stopPropagation()
+        if (event.key === "Escape") {
+          event.preventDefault()
+          useEditor.getState().setEditingId(null)
+        }
+      }}
     >
       <table
         style={{
@@ -108,8 +122,19 @@ export function TableEditor({ element, scale }: { element: TableElement; scale: 
                   >
                     <input
                       value={cell.text}
-                      onChange={(event) => setCell(r, c, { text: event.target.value })}
-                      onFocus={() => useEditor.getState().commit()}
+                      // History gets an entry on the first edit after focus rather than on
+                      // focus itself, so clicking through cells to read them does not bury
+                      // the last real edit under a pile of no-op undo steps.
+                      onChange={(event) => {
+                        if (!dirty.current) {
+                          dirty.current = true
+                          useEditor.getState().commit()
+                        }
+                        setCell(r, c, { text: event.target.value })
+                      }}
+                      onFocus={() => {
+                        dirty.current = false
+                      }}
                       style={{
                         width: "100%",
                         height: "100%",

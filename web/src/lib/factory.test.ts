@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest"
-import { createDeck, createShapeElement, createTableElement, normalizeDeck } from "./factory"
+import {
+  createBlankDeck,
+  createDeck,
+  createShapeElement,
+  createTableElement,
+  normalizeDeck,
+} from "./factory"
 import { SHAPE_MAP } from "./shapes"
 import type { Deck, ShapeElement } from "@/types/slides"
 
@@ -146,5 +152,14 @@ describe("createTableElement", () => {
     expect(table.rows).toHaveLength(3)
     expect(table.rows.every((row) => row.length === 4)).toBe(true)
     expect(table.colWidths.reduce((a, b) => a + b, 0)).toBeCloseTo(1)
+  })
+})
+
+describe("createBlankDeck", () => {
+  it("is one empty slide, not the starter deck's sample content", () => {
+    const blank = createBlankDeck()
+    expect(blank.slides).toHaveLength(1)
+    expect(blank.slides[0].elements).toHaveLength(0)
+    expect(createDeck().slides.flatMap((s) => s.elements).length).toBeGreaterThan(0)
   })
 })

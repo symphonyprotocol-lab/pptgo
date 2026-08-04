@@ -2,7 +2,18 @@ import { SHARE_TOKEN_PARAM } from "./constants"
 import type { Translate } from "./i18n/translate"
 import type { Deck } from "@/types/slides"
 import type { DeckSummary } from "@/types/deck"
-import { loadDeck, saveDeck } from "./storage"
+import { newId } from "./factory"
+import {
+  archiveDeck,
+  forgetRecentDeck,
+  listRecentDecks,
+  loadDeck,
+  saveDeck,
+  takeRecentDeck,
+  type RecentDeck,
+} from "./storage"
+
+export type { RecentDeck }
 
 /**
  * Where the editor reads and writes its deck. The editor itself is storage-agnostic:
@@ -27,6 +38,23 @@ export interface SaveOptions {
   force?: boolean
 }
 
+/**
+ * The decks this storage remembers besides the one being edited, and the operations the
+ * open menu drives them with.
+ *
+ * Only the browser-local editor has one. Signed in, a deck lives at its own URL and the
+ * dashboard is the list of them — swapping the document under `/editor/[id]` would be
+ * saving one deck over another's id, which is not a menu item, it is data loss.
+ */
+export interface DeckLibrary {
+  list(): Promise<RecentDeck[]>
+  /** files the deck being closed, so the reader can get back to it */
+  archive(deck: Deck): Promise<void>
+  /** reads one back out and drops it from the list, because it becomes the current deck */
+  take(id: string): Promise<Deck | null>
+  forget(id: string): Promise<void>
+}
+
 export interface DeckStorage {
   load(): Promise<Deck | null>
   save(deck: Deck, options?: SaveOptions): Promise<SaveResult>
@@ -37,6 +65,7 @@ export interface DeckStorage {
    * there is nothing to poll for, and the editor should not run a timer to keep asking.
    */
   changedRemotely: (() => Promise<boolean>) | null
+  library: DeckLibrary | null
 }
 
 export function localDeckStorage(t: Translate): DeckStorage {
@@ -47,6 +76,14 @@ export function localDeckStorage(t: Translate): DeckStorage {
       return { ok: true }
     },
     changedRemotely: null,
+    library: {
+      list: () => listRecentDecks(t),
+      // the current deck has no identity of its own — it is whatever is in the one slot —
+      // so each archived copy is given one on the way out
+      archive: (deck) => archiveDeck(deck, newId(), t),
+      take: (id) => takeRecentDeck(id, t),
+      forget: (id) => forgetRecentDeck(id, t),
+    },
   }
 }
 
@@ -122,6 +159,9 @@ export function cloudDeckStorage(id: string, t: Translate, shareToken?: string):
       if (version === null) return false
       return (await currentVersion()) > version
     },
+
+    // a signed-in deck's "recent" list is the dashboard, at each deck's own URL
+    library: null,
   }
 }
 
