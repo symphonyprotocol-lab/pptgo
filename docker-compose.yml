@@ -19,9 +19,11 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
     ports:
-      # The host side deliberately avoids 5432: a machine that already runs Postgres is
-      # the common case, and nothing here needs the conventional port.
-      - "${POSTGRES_BIND:-127.0.0.1}:${POSTGRES_PORT:-5433}:5432"
+      # The host side deliberately avoids 5432, and 5433 with it: a machine that already
+      # runs Postgres is the common case, and the second instance on a box tends to have
+      # taken 5433 already. The published ports sit in one block from the web port up, so
+      # they are one range to remember and one range to firewall.
+      - "${POSTGRES_BIND:-127.0.0.1}:${POSTGRES_PORT:-3429}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pptgo} -d ${POSTGRES_DB:-pptgo}"]
       interval: 5s
@@ -45,10 +47,11 @@ services:
     volumes:
       - rustfs-data:/data
     ports:
-      # 9000/9001 are what MinIO and rustfs conventionally take, so the host side steps
-      # aside here too; inside the network the app still uses http://rustfs:9000
-      - "${RUSTFS_BIND:-127.0.0.1}:${RUSTFS_API_PORT:-9100}:9000" # S3 API
-      - "${RUSTFS_BIND:-127.0.0.1}:${RUSTFS_CONSOLE_PORT:-9101}:9001" # console
+      # 9000/9001 are what MinIO and rustfs conventionally take, and 9100/9101 are where
+      # a second one lands, so the host side steps out of the way entirely; inside the
+      # network the app still uses http://rustfs:9000
+      - "${RUSTFS_BIND:-127.0.0.1}:${RUSTFS_API_PORT:-3430}:9000" # S3 API
+      - "${RUSTFS_BIND:-127.0.0.1}:${RUSTFS_CONSOLE_PORT:-3431}:9001" # console
 
   web:
     # Two ways this image comes to exist, and the deployment picks one by setting the
@@ -76,7 +79,7 @@ services:
       # sign-in-free editor working; pressing the sign-in button then lands on
       # /login?error=Configuration, which says what is missing.
       AUTH_SECRET: "${AUTH_SECRET:?set AUTH_SECRET in .env, generate one with openssl rand -base64 32}"
-      AUTH_URL: "${AUTH_URL:-http://localhost:3000}"
+      AUTH_URL: "${AUTH_URL:-http://localhost:3428}"
       AUTH_TRUST_HOST: "true"
       AUTH_GOOGLE_ID: "${AUTH_GOOGLE_ID:-}"
       AUTH_GOOGLE_SECRET: "${AUTH_GOOGLE_SECRET:-}"
@@ -92,7 +95,11 @@ services:
       S3_ACCESS_KEY_ID: "${S3_ACCESS_KEY_ID:?}"
       S3_SECRET_ACCESS_KEY: "${S3_SECRET_ACCESS_KEY:?}"
     ports:
-      - "${WEB_BIND:-0.0.0.0}:${WEB_PORT:-3000}:3000"
+      # 3428 on the host, 3000 inside. Next's own default is what a box is most likely to
+      # already have something sitting on — another Node app, someone's `npm run dev` — and
+      # a collision there stops `docker compose up` dead. Inside the container nothing else
+      # is listening, so the standard port stays.
+      - "${WEB_BIND:-0.0.0.0}:${WEB_PORT:-3428}:3000"
 
 volumes:
   postgres-data:

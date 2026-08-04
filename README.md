@@ -14,7 +14,7 @@ object store, no third-party service in the loop:
 
 ```bash
 ./scripts/gen-secrets.sh   # writes .env and generates the three secrets in it
-docker compose up -d --build
+docker compose up -d --build   # http://localhost:3428
 ```
 
 `gen-secrets.sh` only fills blanks, so it is safe to re-run. Sign-in additionally needs a
@@ -141,7 +141,13 @@ bookkeeping against `pg` alone — same `drizzle.__drizzle_migrations` table, so
 Sign-in needs a Google OAuth client whose authorised redirect URI is
 `<AUTH_URL>/api/auth/callback/google`. The session key, the database password and the
 object-store secret have no defaults and compose refuses to start without them —
-[`scripts/gen-secrets.sh`](scripts/gen-secrets.sh) generates all three. Postgres and rustfs
+[`scripts/gen-secrets.sh`](scripts/gen-secrets.sh) generates all three. The published ports
+are one block — `3428` web, `3429` Postgres, `3430` and `3431` rustfs — rather than the
+conventional 3000/5432/9000/9001, which are the ports a box already running a Node app, a
+Postgres or a MinIO is using, or 5433/9100/9101, which is where its *second* one landed.
+Inside the network every container still answers on its standard port, so only the host
+side moves; `WEB_PORT`, `POSTGRES_PORT`, `RUSTFS_API_PORT` and `RUSTFS_CONSOLE_PORT` move
+it again. Postgres and rustfs
 publish to `127.0.0.1` only; they are exposed at all just so a `npm run dev` outside Docker
 can reach them, and `POSTGRES_BIND` / `RUSTFS_BIND` widen that if you mean to. The image
 build needs network access beyond the base
