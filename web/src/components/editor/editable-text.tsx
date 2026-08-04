@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, type CSSProperties } from "react"
+import { useCallback, useEffect, useRef, type CSSProperties } from "react"
 import {
   Bold,
   Eraser,
@@ -37,6 +37,19 @@ export function EditableText({ html, style, scale, onCommit }: Props) {
   const ref = useRef<HTMLDivElement>(null)
   const committed = useRef(false)
   const commitTimer = useRef<number | null>(null)
+  /**
+   * What the box is holding, kept up to date as it is typed into.
+   *
+   * The commit cannot read it back off the node, because the commit that matters happens
+   * on the way out: React has already detached the node by the time an effect cleanup
+   * runs, so `ref.current` is null at exactly the moment the last edit would be lost.
+   */
+  const latest = useRef<{ html: string; height: number } | null>(null)
+  /** so the flush below calls the current commit rather than the first render's */
+  const onCommitRef = useRef(onCommit)
+  useEffect(() => {
+    onCommitRef.current = onCommit
+  })
 
   useEffect(() => {
     const node = ref.current
@@ -50,17 +63,33 @@ export function EditableText({ html, style, scale, onCommit }: Props) {
     selection?.addRange(range)
   }, [html])
 
+  const snapshot = () => {
+    const node = ref.current
+    if (node) latest.current = { html: node.innerHTML, height: node.scrollHeight }
+  }
+
+  const commit = useCallback(() => {
+    const value = latest.current
+    // nothing was typed, so there is nothing to write back over what the element says
+    if (committed.current || !value) return
+    committed.current = true
+    onCommitRef.current(sanitizeHtml(value.html), value.height)
+  }, [])
+
+  /**
+   * Write back on the way out, not only when a blur settles.
+   *
+   * Editing hardly ever ends with a settled blur: clicking anywhere else takes the pointer
+   * through a handler that clears `editingId`, and this box is gone before the deferred
+   * commit can fire. Cancelling the pending timer and stopping there is what threw away
+   * everything the user had just typed.
+   */
   useEffect(() => {
     return () => {
       if (commitTimer.current) window.clearTimeout(commitTimer.current)
+      commit()
     }
-  }, [])
-
-  const commit = () => {
-    if (committed.current || !ref.current) return
-    committed.current = true
-    onCommit(sanitizeHtml(ref.current.innerHTML), ref.current.scrollHeight)
-  }
+  }, [commit])
 
   /** Clicking a toolbar button blurs the editor; hold the commit until focus settles. */
   const deferBlur = () => {
@@ -77,6 +106,7 @@ export function EditableText({ html, style, scale, onCommit }: Props) {
     cancelBlur()
     ref.current?.focus()
     exec(command, value)
+    snapshot()
   }
 
   return (
@@ -88,6 +118,11 @@ export function EditableText({ html, style, scale, onCommit }: Props) {
         data-editing-text
         style={{ ...style, outline: "none", cursor: "text", overflow: "visible" }}
         onBlur={deferBlur}
+        onInput={snapshot}
+        // While this box is open it owns its own pointer. The canvas clears `editingId` on
+        // any pointer down that reaches it, so without this a click to place the caret read
+        // as a click away and closed the editor on the first character.
+        onPointerDown={(e) => e.stopPropagation()}
         onMouseDown={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
           e.stopPropagation()

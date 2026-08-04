@@ -16,9 +16,16 @@ function ScrollArea({
       className={cn("relative", className)}
       {...props}
     >
+      {/*
+        Radix wraps the viewport's children in a `display: table` box. A table shrink-wraps
+        to its content, so anything sized against the viewport — a `width: 100%` child, or
+        one whose width is being measured — gets the content's own width instead and the
+        area scrolls sideways over its own layout. `block` is what every consumer here
+        expects; nothing in this app scrolls a viewport horizontally.
+      */}
       <ScrollAreaPrimitive.Viewport
         data-slot="scroll-area-viewport"
-        className="size-full rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1"
+        className="size-full rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1 [&>div]:block!"
       >
         {children}
       </ScrollAreaPrimitive.Viewport>

@@ -424,6 +424,22 @@ export function normalizeIncomingElements(value: unknown): SlideElement[] {
     .map((el) => ({ ...el, id: newId() }))
 }
 
+/**
+ * One empty slide and nothing else — what "blank presentation" means everywhere else.
+ * `createDeck` is the *starter* deck, with sample content on it to show what the editor
+ * can do; a reader who asks for a blank one has already seen that.
+ */
+export function createBlankDeck(t: Translate = fallbackTranslate): Deck {
+  return {
+    version: 1,
+    title: t("deck.untitled"),
+    width: VIEWPORT_WIDTH,
+    height: VIEWPORT_HEIGHT,
+    theme: DEFAULT_THEME,
+    slides: [createSlide()],
+  }
+}
+
 export function createDeck(t: Translate = fallbackTranslate): Deck {
   const cover = createSlide({
     background: { type: "solid", color: "#0f172a" },

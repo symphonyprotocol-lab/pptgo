@@ -244,7 +244,11 @@ export function EditorShell({ storage, backHref = "/" }: EditorShellProps) {
   return (
     <TooltipProvider>
       <div className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
-        <Toolbar onPresent={() => setPresenting(true)} backHref={backHref} />
+        <Toolbar
+          onPresent={() => setPresenting(true)}
+          backHref={backHref}
+          library={storage.library}
+        />
 
         <div className="flex min-h-0 flex-1">
           {compact ? (

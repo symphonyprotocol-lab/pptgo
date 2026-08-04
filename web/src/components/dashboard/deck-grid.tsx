@@ -21,8 +21,9 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { DeckCover } from "@/components/dashboard/deck-cover"
 import { ShareBadge, ShareDialog } from "@/components/dashboard/share-dialog"
-import { createDeck } from "@/lib/factory"
+import { createBlankDeck } from "@/lib/factory"
 import { useI18n } from "@/lib/i18n/client"
 import { formatTime } from "@/lib/relative-time"
 import type { Translate } from "@/lib/i18n/translate"
@@ -83,12 +84,14 @@ export function DeckGrid({
     setCreating(true)
     setError(null)
     try {
-      // the starter deck is built here rather than on the server: its text runs go
-      // through sanitizeHtml, which needs a DOM
+      // Blank, which is what the tile under this button has always said it makes. It used
+      // to create the starter deck — the sample slides that show a first-time visitor what
+      // the editor does — so anyone adding a deck to a dashboard they already had decks in
+      // got two pages of demo content to delete first.
       const body = await call<{ deck: DeckSummary }>("/api/decks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ deck: createDeck(t) }),
+        body: JSON.stringify({ deck: createBlankDeck(t) }),
       })
       if (body) router.push(`/editor/${body.deck.id}`)
     } catch (e) {
@@ -259,21 +262,7 @@ function DeckCard({
     <article className="group relative border border-border bg-card transition-colors hover:bg-muted">
       <Link href={`/editor/${deck.id}`} className="block">
         <div className="relative aspect-video overflow-hidden border-b border-border bg-white">
-          {deck.hasThumbnail ? (
-            // eslint-disable-next-line @next/next/no-img-element -- served by an authorised API route, not a static asset
-            <img
-              src={`/api/decks/${deck.id}/thumbnail?v=${encodeURIComponent(deck.updatedAt)}`}
-              alt=""
-              className="size-full object-cover"
-              loading="lazy"
-            />
-          ) : (
-            <div className="flex size-full items-center justify-center bg-muted">
-              <span className="font-mono text-[10px] tracking-[0.24em] text-muted-foreground uppercase">
-                {t("dashboard.noPreview")}
-              </span>
-            </div>
-          )}
+          <DeckCover deck={deck} t={t} />
           {share && (
             <span className="absolute top-2 left-2">
               <ShareBadge share={share} t={t} />

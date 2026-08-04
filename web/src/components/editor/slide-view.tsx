@@ -1,6 +1,6 @@
 "use client"
 
-import type { CSSProperties } from "react"
+import { useEffect, useRef, useState, type CSSProperties } from "react"
 import { animationStateOf, buildSteps } from "@/lib/animation"
 import { VIEWPORT_HEIGHT, VIEWPORT_WIDTH } from "@/lib/constants"
 import type { Slide, SlideBackground, SlideElement } from "@/types/slides"
@@ -91,18 +91,45 @@ export function SlideView({ slide, animationStep, playable, onFollowLink }: Prop
   )
 }
 
-export function SlideThumbnail({ slide, width }: { slide: Slide; width: number }) {
-  const scale = width / VIEWPORT_WIDTH
+/**
+ * A slide at thumbnail size, drawn by scaling the real renderer so a preview can never
+ * disagree with the canvas about how a deck looks.
+ *
+ * Leave `width` out and it fills the box it is given, measuring itself to work out the
+ * scale. That is what a rail wants: its width is not one number — a fixed sidebar on a
+ * wide screen, a drawer on a narrow one — so a thumbnail pinned to a constant sat inside
+ * a card that was wider than it was, showing a strip of the card's own white down one
+ * side of every slide.
+ */
+export function SlideThumbnail({ slide, width }: { slide: Slide; width?: number }) {
+  const box = useRef<HTMLDivElement>(null)
+  const [measured, setMeasured] = useState(0)
+
+  useEffect(() => {
+    const node = box.current
+    if (width !== undefined || !node) return
+    setMeasured(node.getBoundingClientRect().width)
+    const observer = new ResizeObserver(([entry]) => setMeasured(entry.contentRect.width))
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [width])
+
+  const rendered = width ?? measured
   return (
     <div
+      ref={box}
       style={{
-        width,
-        height: width * (VIEWPORT_HEIGHT / VIEWPORT_WIDTH),
+        width: width ?? "100%",
+        // the ratio rather than a computed height, so the box is already the right shape
+        // on the render before it has been measured
+        aspectRatio: `${VIEWPORT_WIDTH} / ${VIEWPORT_HEIGHT}`,
         overflow: "hidden",
         position: "relative",
       }}
     >
-      <div style={{ transform: `scale(${scale})`, transformOrigin: "0 0" }}>
+      <div
+        style={{ transform: `scale(${rendered / VIEWPORT_WIDTH})`, transformOrigin: "0 0" }}
+      >
         <SlideView slide={slide} />
       </div>
     </div>
