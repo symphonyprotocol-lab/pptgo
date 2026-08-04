@@ -44,6 +44,14 @@ const TRANSITION_ANIMATION: Record<TransitionType, string | undefined> = {
 
 const PEN_COLORS = ["#ef4444", "#22c55e", "#3b82f6", "#eab308", "#111827", "#ffffff"]
 
+/**
+ * How long the room has to be still before the controls fade.
+ *
+ * Long enough to reach for a button after deciding to, short enough that the first slide is
+ * clean by the time anybody is looking at it.
+ */
+const IDLE_DELAY = 2500
+
 export function PresentView({ slides, startIndex, onExit }: Props) {
   const t = useT()
   const [index, setIndex] = useState(startIndex)
@@ -58,6 +66,8 @@ export function PresentView({ slides, startIndex, onExit }: Props) {
   const [autoplay, setAutoplay] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const [showTimer, setShowTimer] = useState(false)
+  /** Whether the control bar has faded out because nobody has moved for a while. */
+  const [idle, setIdle] = useState(false)
 
   const rootRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -215,6 +225,50 @@ export function PresentView({ slides, startIndex, onExit }: Props) {
     ctx.stroke()
   }
 
+  /*
+    The chrome gets out of the way.
+
+    A presentation is the slide, and a row of buttons floating over the bottom of it is in
+    every photograph anyone takes of the screen. So it fades once the room has settled and
+    comes back the moment the presenter touches anything — the same bargain every other
+    presentation tool makes, and the reason nobody notices it is there.
+
+    Two things hold it open. Annotating, because the pen palette is what the presenter is
+    reaching for and a presenter who pauses to think should not have to hunt for it again;
+    and the pointer resting on the bar itself, or moving toward a button would dismiss the
+    button.
+  */
+  const annotating = tool !== "none" || Boolean(laser)
+  const overControls = useRef(false)
+  const idleTimer = useRef<number | null>(null)
+
+  /** Restart the countdown. Schedules only — nothing here sets state on the spot. */
+  const arm = useCallback(() => {
+    if (idleTimer.current) window.clearTimeout(idleTimer.current)
+    if (annotating) return
+    idleTimer.current = window.setTimeout(() => {
+      if (!overControls.current) setIdle(true)
+    }, IDLE_DELAY)
+  }, [annotating])
+
+  useEffect(() => {
+    // re-armed rather than woken when `annotating` flips: picking up the pen is a click,
+    // and the click already showed the bar on its way through the listener below
+    arm()
+
+    const wake = () => {
+      setIdle(false)
+      arm()
+    }
+    const events = ["pointermove", "pointerdown", "keydown", "wheel", "touchstart"] as const
+    for (const name of events) window.addEventListener(name, wake, { passive: true })
+
+    return () => {
+      for (const name of events) window.removeEventListener(name, wake)
+      if (idleTimer.current) window.clearTimeout(idleTimer.current)
+    }
+  }, [arm])
+
   const onPointerUp = () => {
     if (!drawing.current) return
     drawing.current = false
@@ -276,6 +330,9 @@ export function PresentView({ slides, startIndex, onExit }: Props) {
     <div
       ref={rootRef}
       className="fixed inset-0 z-50 flex touch-none items-center justify-center bg-black"
+      // the pointer goes with the chrome — a cursor parked over a slide is the other thing
+      // that ends up in the photograph
+      style={idle ? { cursor: "none" } : undefined}
       onClick={(event) => {
         // a swipe ends with a click too; only a stationary tap should advance
         if (tool === "none" && event.detail !== 0) advance()
@@ -311,7 +368,10 @@ export function PresentView({ slides, startIndex, onExit }: Props) {
           width={VIEWPORT_WIDTH}
           height={VIEWPORT_HEIGHT}
           className="absolute inset-0 h-full w-full"
-          style={{ pointerEvents: tool === "none" && !laser ? "none" : "auto", cursor: tool === "none" ? "default" : "crosshair" }}
+          style={{
+            pointerEvents: tool === "none" && !laser ? "none" : "auto",
+            cursor: tool !== "none" ? "crosshair" : idle ? "none" : "default",
+          }}
           onClick={(event) => event.stopPropagation()}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
@@ -363,7 +423,19 @@ export function PresentView({ slides, startIndex, onExit }: Props) {
       )}
 
       <div
-        className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full bg-white/10 px-2 py-1 backdrop-blur"
+        className={cn(
+          "absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full bg-white/10 px-2 py-1 backdrop-blur",
+          "transition-opacity duration-500",
+          // not merely invisible: a bar that is still clickable while it cannot be seen
+          // turns a stray tap on the slide into a pen or an exit
+          idle && "pointer-events-none opacity-0",
+        )}
+        onPointerEnter={() => {
+          overControls.current = true
+        }}
+        onPointerLeave={() => {
+          overControls.current = false
+        }}
         onClick={(e) => e.stopPropagation()}
       >
         <ControlButton title={t("present.previous")} onClick={retreat}>

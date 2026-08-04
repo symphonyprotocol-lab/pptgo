@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
-import { Maximize, PenLine, Radio } from "lucide-react"
+import { ChevronLeft, ChevronRight, Maximize, PenLine, Radio } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { PresentView } from "@/components/editor/present-view"
 import { SlideThumbnail, SlideView } from "@/components/editor/slide-view"
@@ -10,6 +10,7 @@ import { SHARE_KEY_PARAM, SHARE_TOKEN_PARAM, VIEWPORT_HEIGHT, VIEWPORT_WIDTH } f
 import { normalizeDeck } from "@/lib/factory"
 import { useI18n } from "@/lib/i18n/client"
 import { formatTime } from "@/lib/relative-time"
+import { slideNumber } from "@/lib/slide-number"
 import { cn } from "@/lib/utils"
 import type { Deck, Slide } from "@/types/slides"
 import type { DeckSummary } from "@/types/deck"
@@ -72,11 +73,80 @@ export function PreviewShell({
   const slidesRef = useRef<Slide[]>([])
   const [scale, setScale] = useState(1)
   const stage = useRef<HTMLDivElement>(null)
+  const rail = useRef<HTMLDivElement>(null)
 
-  const setFollow = (value: boolean) => {
+  const setFollow = useCallback((value: boolean) => {
     followingRef.current = value
     setFollowing(value)
-  }
+  }, [])
+
+  const slideCount = deck?.slides.length ?? 0
+
+  /**
+   * Turning a page by hand, which is also a decision to stop being dragged around.
+   *
+   * Same rule as clicking a thumbnail: someone steering deliberately outranks whatever is
+   * being written into the deck underneath them.
+   */
+  const turn = useCallback(
+    (to: number | ((current: number) => number)) => {
+      if (!slideCount) return
+      setFollow(false)
+      setIndex((current) => {
+        const next = typeof to === "function" ? to(current) : to
+        return Math.min(Math.max(next, 0), slideCount - 1)
+      })
+    },
+    [slideCount, setFollow],
+  )
+
+  /*
+    Arrow keys outside fullscreen too.
+
+    Someone handed this link is reading a deck, not operating an app, and the keys that
+    turn a page are the ones they already have their hand on. PresentView installs the same
+    keys for the fullscreen case, so this one stands down while that is up rather than
+    both firing and skipping two slides at a time.
+  */
+  useEffect(() => {
+    if (presenting || slideCount < 2) return
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return
+      const target = event.target as HTMLElement | null
+      if (target?.isContentEditable) return
+      if (/^(input|textarea|select)$/i.test(target?.tagName ?? "")) return
+
+      if (["ArrowRight", "ArrowDown", "PageDown"].includes(event.key)) {
+        event.preventDefault()
+        turn((current) => current + 1)
+      } else if (["ArrowLeft", "ArrowUp", "PageUp"].includes(event.key)) {
+        event.preventDefault()
+        turn((current) => current - 1)
+      } else if (event.key === "Home") {
+        event.preventDefault()
+        turn(0)
+      } else if (event.key === "End") {
+        event.preventDefault()
+        turn(slideCount - 1)
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [presenting, slideCount, turn])
+
+  /*
+    Keep the current thumbnail in the rail.
+
+    Without this, paging with the keyboard walks the selection off the end of a rail that
+    never scrolls — the slide changes and the highlighted thumbnail is somewhere off to the
+    right, which reads as the rail having lost track rather than the page having turned.
+  */
+  useEffect(() => {
+    const active = rail.current?.children[index] as HTMLElement | undefined
+    active?.scrollIntoView({ block: "nearest", inline: "nearest" })
+  }, [index])
 
   /**
    * Whichever link got the reader here, repeated on every read. Nothing at all when they
@@ -196,7 +266,9 @@ export function PreviewShell({
 
   if (!deck || !summary) return <div className="flex-1 bg-muted/40" />
 
-  const current = deck.slides[Math.min(index, deck.slides.length - 1)]
+  // `index` can outrun the deck for one render when a slide is deleted under the reader
+  const at = Math.min(index, deck.slides.length - 1)
+  const current = deck.slides[at]
 
   /*
     The editor's own presentation view, handed the shared deck. It fits the window, takes
@@ -310,24 +382,57 @@ export function PreviewShell({
       </div>
 
       <footer className="flex items-center gap-3 border-t border-border px-4 py-2">
-        <span className="shrink-0 font-mono text-[11px] tracking-wider text-muted-foreground">
-          {t("preview.position", { index: index + 1, total: deck.slides.length })}
-        </span>
+        <div className="flex shrink-0 items-center gap-1">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="size-7 p-0"
+            title={`${t("preview.previous")} · ${t("preview.pageHint")}`}
+            aria-label={t("preview.previous")}
+            disabled={at === 0}
+            onClick={() => turn((current) => current - 1)}
+          >
+            <ChevronLeft className="size-4" />
+          </Button>
 
-        <div className="flex min-w-0 flex-1 gap-2 overflow-x-auto pb-1">
-          {deck.slides.map((slide, at) => (
+          {/*
+            Padded, and `tabular-nums` on top of it: the pad holds the character count and
+            the figures hold their width, so the rail beside this never moves as you page.
+            The aria-label below stays an ordinary integer — "01" is for looking at.
+          */}
+          <span className="font-mono text-[11px] tracking-wider text-muted-foreground tabular-nums">
+            {t("preview.position", {
+              index: slideNumber(at + 1, deck.slides.length),
+              total: deck.slides.length,
+            })}
+          </span>
+
+          <Button
+            size="sm"
+            variant="ghost"
+            className="size-7 p-0"
+            title={`${t("preview.next")} · ${t("preview.pageHint")}`}
+            aria-label={t("preview.next")}
+            disabled={at === deck.slides.length - 1}
+            onClick={() => turn((current) => current + 1)}
+          >
+            <ChevronRight className="size-4" />
+          </Button>
+        </div>
+
+        <div ref={rail} className="flex min-w-0 flex-1 gap-2 overflow-x-auto pb-1">
+          {deck.slides.map((slide, position) => (
             <button
               key={slide.id}
-              onClick={() => {
-                setIndex(at)
-                // a deliberate choice of slide outranks whatever is being written
-                setFollow(false)
-              }}
+              onClick={() => turn(position)}
               className={cn(
                 "shrink-0 border transition-colors",
-                at === index ? "border-primary" : "border-border hover:border-foreground/40",
+                position === at ? "border-primary" : "border-border hover:border-foreground/40",
               )}
-              aria-label={t("preview.position", { index: at + 1, total: deck.slides.length })}
+              aria-label={t("preview.position", {
+                index: position + 1,
+                total: deck.slides.length,
+              })}
             >
               <SlideThumbnail slide={slide} width={104} />
             </button>
