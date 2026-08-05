@@ -30,8 +30,15 @@ concurrency:
 permissions:
   contents: read
 
+# The repository is public, so who may start a run is worth saying out loud. Both triggers
+# above already require write access — a stranger can neither push to main nor dispatch —
+# but write access is granted at the organisation and production is not. Naming the account
+# rather than trusting the role means adding a maintainer to the org does not also hand them
+# the deploy. A run started by anyone else is skipped rather than failed: nothing was wrong
+# with it, it just is not allowed to ship.
 jobs:
   image:
+    if: github.actor == 'VirgilZhao'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -77,6 +84,11 @@ jobs:
 
   deploy:
     needs: image
+    # repeated rather than left to `needs`, so the job that holds the deploy key and touches
+    # the live server states its own condition instead of inheriting one from the job above.
+    # A plain `if` does not loosen `needs` — only a status function like always() does that —
+    # so a failed build still stops here.
+    if: github.actor == 'VirgilZhao'
     runs-on: ubuntu-latest
     # `packages: read` because the token this job hands the server is what pulls the image,
     # and the workflow-level `permissions:` block above replaces the token's default scopes
